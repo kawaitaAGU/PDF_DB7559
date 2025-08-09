@@ -10,8 +10,28 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
 import time  # ← 経過時間用
 
-# PDFフォント設定
-pdfmetrics.registerFont(TTFont("Japanese", "fonts/IPAexGothic.ttf"))
+from pathlib import Path
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+
+# ---- フォント設定（IPAex を優先、無ければCIDフォントへフォールバック）----
+def _setup_font():
+    here = Path(__file__).parent
+    candidates = [
+        here / "fonts" / "IPAexGothic.ttf",
+        here / "IPAexGothic.ttf",
+        Path.cwd() / "fonts" / "IPAexGothic.ttf",
+        Path.cwd() / "IPAexGothic.ttf",
+    ]
+    for p in candidates:
+        if p.exists():
+            pdfmetrics.registerFont(TTFont("Japanese", str(p)))
+            return "Japanese"
+    # フォントが見つからない環境では落とさずにCIDフォントを使用
+    pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
+    return "HeiseiKakuGo-W5"
+
+JAPANESE_FONT = _setup_font()
 
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
@@ -89,7 +109,7 @@ def convert_google_drive_link(url):
 def create_pdf(records, progress=None, status=None, start_time=None):
     pdf_buffer = io.BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=A4)
-    c.setFont("Japanese", 12)
+    c.setFont(JAPANESE_FONT, 12)
     width, height = A4
     y = height - 40
 
@@ -106,7 +126,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
             y -= 18
             if y < 100:
                 c.showPage()
-                c.setFont("Japanese", 12)
+                c.setFont(JAPANESE_FONT, 12)
                 y = height - 40
 
         if pd.notna(row.get("リンクURL", "")) and str(row["リンクURL"]).strip() != "":
@@ -126,7 +146,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
                 y -= new_height + 20
                 if y < 100:
                     c.showPage()
-                    c.setFont("Japanese", 12)
+                    c.setFont(JAPANESE_FONT, 12)
                     y = height - 40
             except Exception as e:
                 c.drawString(40, y, f"[画像読み込み失敗: {e}]")
