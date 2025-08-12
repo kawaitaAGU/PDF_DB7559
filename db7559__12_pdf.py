@@ -8,7 +8,8 @@ from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfbase.pdfmetrics import stringWidth  # ← 文字幅計測（折り返し用）
+from reportlab.pdfbase.pdfmetrics import stringWidth
+from reportlab.lib.utils import ImageReader   # ★ 追加：ReportLab用の画像ラッパー
 import time
 
 from pathlib import Path
@@ -28,7 +29,6 @@ def _setup_font():
         if p.exists():
             pdfmetrics.registerFont(TTFont("Japanese", str(p)))
             return "Japanese"
-    # フォントが見つからない環境では落とさずにCIDフォントを使用
     pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
     return "HeiseiKakuGo-W5"
 
@@ -72,7 +72,7 @@ st.download_button(
     mime="text/csv"
 )
 
-# ===== TXT 出力整形 =====
+# ===== TXT 整形 =====
 def format_record_to_text(row):
     parts = [f"問題文: {row['問題文']}"]
     for i in range(1, 6):
@@ -107,9 +107,8 @@ def convert_google_drive_link(url):
             return url
     return url
 
-# ===== 折り返し（PDF用・幅で改行）=====
+# ===== 折り返し（PDF用）=====
 def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
-    """日本語混在も幅で素直に折り返す（空白なしでもOK）。"""
     if text is None:
         return [""]
     s = str(text)
@@ -126,17 +125,21 @@ def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
         lines.append(buf)
     return lines
 
-# ===== PDF 作成（進捗付き・折り返し有り）=====
+# ===== PDF 作成（画像はみ出し防止＋ImageReader使用）=====
 def create_pdf(records, progress=None, status=None, start_time=None):
     pdf_buffer = io.BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=A4)
     c.setFont(JAPANESE_FONT, 12)
     width, height = A4
+
+    # 余白とレイアウト
+    top_margin = 40
+    bottom_margin = 60
     left_margin = 40
     right_margin = 40
     usable_width = width - left_margin - right_margin
     line_h = 18
-    y = height - 40
+    y = height - top_margin
 
     total = len(records)
 
@@ -144,37 +147,78 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         m = int(sec // 60); s = int(sec % 60)
         return f"{m:02d}:{s:02d}"
 
-    for idx, (_, row) in enumerate(records.iterrows(), start=1):
-        # 問題文・選択肢・正解・分類（全文折り返し）
-        for line in format_record_to_text(row).split("\n"):
-            for sub in wrap_text(line, usable_width, JAPANESE_FONT, 12):
-                c.drawString(left_margin, y, sub)
-                y -= line_h
-                if y < 100:
-                    c.showPage(); c.setFont(JAPANESE_FONT, 12); y = height - 40
+    def draw_wrapped(prefix, text):
+        nonlocal y
+        for sub in wrap_text(f"{prefix}{text}", usable_width, JAPANESE_FONT, 12):
+            c.drawString(left_margin, y, sub)
+            y -= line_h
+            if y < bottom_margin:
+                c.showPage(); c.setFont(JAPANESE_FONT, 12); y = height - top_margin
 
-        # 画像（任意）
-        if pd.notna(row.get("リンクURL", "")) and str(row["リンクURL"]).strip() != "":
-            image_url = convert_google_drive_link(row["リンクURL"])
+    for idx, (_, row) in enumerate(records.iterrows(), start=1):
+        # ---- 問題文 ----
+        draw_wrapped("問題文: ", row.get("問題文", ""))
+
+        # ---- 選択肢 ----
+        for i in range(1, 6):
+            val = row.get(f"選択肢{i}", None)
+            if pd.notna(val) and str(val).strip() != "":
+                draw_wrapped(f"選択肢{i}: ", val)
+
+        # ---- 画像 ----
+        link_raw = row.get("リンクURL", None)
+        if pd.notna(link_raw) and str(link_raw).strip() != "":
+            image_url = convert_google_drive_link(str(link_raw).strip())
             try:
                 response = requests.get(image_url, timeout=5)
-                img = Image.open(io.BytesIO(response.content)).convert("RGB")
-                iw, ih = img.size
-                scale = min((usable_width) / iw, 200 / ih, 1.0)
-                nw, nh = iw * scale, ih * scale
-                img_io = io.BytesIO()
-                img.save(img_io, format="PNG")
-                img_io.seek(0)
-                c.drawInlineImage(Image.open(img_io), left_margin, y - nh, width=nw, height=nh)
-                y -= nh + 20
-                if y < 100:
-                    c.showPage(); c.setFont(JAPANESE_FONT, 12); y = height - 40
-            except Exception as e:
-                for sub in wrap_text(f"[画像読み込み失敗: {e}]", usable_width, JAPANESE_FONT, 12):
-                    c.drawString(left_margin, y, sub)
-                    y -= line_h
+                pil = Image.open(io.BytesIO(response.content)).convert("RGB")
+                iw, ih = pil.size
 
+                # 初期スケール（横幅＆最大高さ200ptの制約）
+                max_h_limit = 200
+                base_scale = min(usable_width / iw, max_h_limit / ih, 1.0)
+                nw, nh = iw * base_scale, ih * base_scale
+
+                # 残り縦スペースに入らない場合は改ページして再計算
+                remaining_h = y - bottom_margin
+                if nh > remaining_h:
+                    c.showPage(); c.setFont(JAPANESE_FONT, 12)
+                    y = height - top_margin
+                    remaining_h = y - bottom_margin
+                    base_scale = min(usable_width / iw, min(max_h_limit, remaining_h) / ih, 1.0)
+                    nw, nh = iw * base_scale, ih * base_scale
+
+                # それでも大きければ高さ側でさらに調整
+                if nh > (y - bottom_margin):
+                    adj = (y - bottom_margin) / nh
+                    nw, nh = nw * adj, nh * adj
+
+                # ReportLab が受け取れる形式にする（★ここが修正点）
+                img_io = io.BytesIO()
+                pil.save(img_io, format="PNG")
+                img_io.seek(0)
+                img_reader = ImageReader(img_io)
+
+                # 描画（アスペクト比維持）
+                c.drawImage(img_reader, left_margin, y - nh,
+                            width=nw, height=nh, preserveAspectRatio=True, mask='auto')
+                y -= nh + 20
+                if y < bottom_margin:
+                    c.showPage(); c.setFont(JAPANESE_FONT, 12); y = height - top_margin
+
+            except Exception as e:
+                draw_wrapped("", f"[画像読み込み失敗: {e}]")
+
+        # ---- 正解・分類 ----
+        draw_wrapped("正解: ", row.get("正解", ""))
+        draw_wrapped("分類: ", row.get("科目分類", ""))
+
+        # セパレータ
         y -= 20
+        if y < bottom_margin:
+            c.showPage(); c.setFont(JAPANESE_FONT, 12); y = height - top_margin
+
+        # 進捗表示
         if progress is not None:
             progress.progress(min(idx / max(total, 1), 1.0))
         if status is not None and start_time is not None:
