@@ -317,18 +317,28 @@ if st.session_state["pdf_bytes"] is not None:
         mime="application/pdf"
     )
 
-# ===== 画面の一覧（画像はリンクのみ）=====
+# ===== 画面の一覧（画像はリンクのみ／正解は初期非表示でトグル）=====
 st.markdown("### 🔍 ヒットした問題一覧")
 for i, (_, record) in enumerate(df_filtered.iterrows()):
     with st.expander(f"{i+1}. {record['問題文'][:50]}..."):
         st.markdown("### 📝 問題文")
         st.write(record["問題文"])
+
         st.markdown("### ✏️ 選択肢")
         for j in range(1, 6):
             if pd.notna(record.get(f"選択肢{j}", None)):
                 st.write(f"- {record[f'選択肢{j}']}")
-        st.markdown(f"**✅ 正解:** {record['正解']}")
+
+        # ✅ 正解は初期非表示（クリックで表示）
+        show_ans = st.checkbox("正解を表示する", key=f"show_answer_{i}", value=False)
+        if show_ans:
+            st.markdown(f"**✅ 正解:** {record['正解']}")
+        else:
+            st.markdown("**✅ 正解:** |||（クリックで表示）|||")
+
+        # 分類はそのまま表示（必要なら同様に隠すことも可）
         st.markdown(f"**📚 分類:** {record['科目分類']}")
+
         if pd.notna(record.get("リンクURL", None)) and str(record["リンクURL"]).strip() != "":
             image_url = convert_google_drive_link(record["リンクURL"])
             st.markdown(f"[画像リンクはこちら]({image_url})")
