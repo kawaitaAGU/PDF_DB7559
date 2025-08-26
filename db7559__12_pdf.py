@@ -13,6 +13,7 @@ from reportlab.lib.utils import ImageReader
 import time
 from pathlib import Path
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+import re
 
 # ---- フォント設定（IPAex を優先、無ければCIDフォントへフォールバック）----
 def _setup_font():
@@ -27,7 +28,6 @@ def _setup_font():
         if p.exists():
             pdfmetrics.registerFont(TTFont("Japanese", str(p)))
             return "Japanese"
-    # フォントが無い環境でも落とさない
     pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
     return "HeiseiKakuGo-W5"
 
@@ -36,34 +36,100 @@ JAPANESE_FONT = _setup_font()
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
 
+# ===== 列名正規化 & 安全取得ユーティリティ =====
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """BOM/空白/改行を除去し、よくある別名を正式名へ寄せる"""
+    def _clean(s):
+        s = str(s).replace("\ufeff", "")
+        return re.sub(r"[\u3000 \t\r\n]+", "", s)
+    df = df.copy()
+    df.columns = [_clean(c) for c in df.columns]
+
+    alias = {
+        "問題文":  ["設問", "問題", "本文"],
+        "選択肢1": ["選択肢Ａ","選択肢a","A","ａ"],
+        "選択肢2": ["選択肢Ｂ","選択肢b","B","ｂ"],
+        "選択肢3": ["選択肢Ｃ","選択肢c","C","ｃ"],
+        "選択肢4": ["選択肢Ｄ","選択肢d","D","ｄ"],
+        "選択肢5": ["選択肢Ｅ","選択肢e","E","ｅ"],
+        "正解":    ["解答","答え","ans","answer"],
+        "科目分類": ["分類","科目","カテゴリ","カテゴリー"],
+        "リンクURL": ["画像URL","画像リンク","リンク","画像Link"],
+    }
+    colset = set(df.columns)
+    for canon, cands in alias.items():
+        if canon in colset:
+            continue
+        for c in cands:
+            if c in colset:
+                df.rename(columns={c: canon}, inplace=True)
+                colset.add(canon)
+                break
+    return df
+
+def safe_get(row: pd.Series | dict, keys, default=""):
+    """Series/辞書から安全に値を取得（NaN, 空白, 別名を考慮）"""
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    for k in keys:
+        if k in row:
+            v = row.get(k)
+            try:
+                if pd.isna(v):
+                    continue
+            except Exception:
+                pass
+            s = str(v).strip() if v is not None else ""
+            if s:
+                return s
+    return default
+
+def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
+    need = ["問題文","選択肢1","選択肢2","選択肢3","選択肢4","選択肢5","正解","科目分類","リンクURL"]
+    out = df.copy()
+    for c in need:
+        if c not in out.columns:
+            out[c] = ""
+    return out
+
 # ===== データ読み込み =====
-df = pd.read_csv("97_118DB.csv")
+# BOM 対策のため utf-8-sig、文字列で統一して取り込み
+df = pd.read_csv("97_118DB.csv", dtype=str, encoding="utf-8-sig")
+df = df.fillna("")
+df = normalize_columns(df)
 
 # ===== 検索 =====
 query = st.text_input("問題文・選択肢・分類で検索:")
-st.caption("💡 検索語を `&` でつなげるとAND検索ができます（例: レジン & 硬さ）")
+st.caption("💡 検索語を `&` でつなげるとAND検索（例: レジン & 硬さ）")
 
-# 初期表示では何も描画しない
 if not query:
     st.stop()
 
 keywords = [kw.strip() for kw in query.split("&") if kw.strip()]
+
+def row_text(r: pd.Series) -> str:
+    parts = [
+        safe_get(r, ["問題文","設問","問題","本文"]),
+        *[safe_get(r, [f"選択肢{i}"]) for i in range(1,6)],
+        safe_get(r, ["正解","解答","答え"]),
+        safe_get(r, ["科目分類","分類","科目"]),
+    ]
+    return " ".join([p for p in parts if p])
+
 df_filtered = df[df.apply(
-    lambda row: all(
-        kw.lower() in row.astype(str).str.lower().str.cat(sep=" ")
-        for kw in keywords
-    ), axis=1
+    lambda row: all(kw.lower() in row_text(row).lower() for kw in keywords),
+    axis=1
 )]
+df_filtered = df_filtered.reset_index(drop=True)
 
 st.info(f"{len(df_filtered)}件ヒットしました")
 
 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-safe_query = query if query else "検索なし"
-file_prefix = f"{safe_query}{timestamp}"
+file_prefix = f"{(query if query else '検索なし')}{timestamp}"
 
 # ===== CSV ダウンロード =====
 csv_buffer = io.StringIO()
-df_filtered.to_csv(csv_buffer, index=False)
+ensure_output_columns(df_filtered).to_csv(csv_buffer, index=False)
 st.download_button(
     label="📥 ヒット結果をCSVダウンロード",
     data=csv_buffer.getvalue(),
@@ -72,31 +138,6 @@ st.download_button(
 )
 
 # ===== TXT 整形 =====
-def format_record_to_text(row):
-    parts = [f"問題文: {row['問題文']}"]
-    for i in range(1, 6):
-        choice = row.get(f"選択肢{i}", "")
-        if pd.notna(choice):
-            parts.append(f"選択肢{i}: {choice}")
-    parts.append(f"正解: {row['正解']}")
-    parts.append(f"分類: {row['科目分類']}")
-    if pd.notna(row.get("リンクURL", "")) and str(row["リンクURL"]).strip() != "":
-        parts.append(f"画像リンク: {row['リンクURL']}（PDFに画像表示）")
-    return "\n".join(parts)
-
-# ===== TXT ダウンロード =====
-txt_buffer = io.StringIO()
-for _, row in df_filtered.iterrows():
-    txt_buffer.write(format_record_to_text(row))
-    txt_buffer.write("\n\n" + "-"*40 + "\n\n")
-st.download_button(
-    label="📄 ヒット結果をTEXTダウンロード",
-    data=txt_buffer.getvalue(),
-    file_name=f"{file_prefix}.txt",
-    mime="text/plain"
-)
-
-# ===== Google Drive 直リンク化 =====
 def convert_google_drive_link(url):
     if "drive.google.com" in url and "/file/d/" in url:
         try:
@@ -106,11 +147,8 @@ def convert_google_drive_link(url):
             return url
     return url
 
-# ===== 折り返し（PDF用）=====
 def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
-    if text is None:
-        return [""]
-    s = str(text)
+    s = "" if text is None else str(text)
     if s == "":
         return [""]
     lines, buf = [], ""
@@ -125,11 +163,33 @@ def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
     return lines
 
 def wrapped_lines(prefix: str, value: str, usable_width: float, font: str, size: int):
-    """テキストを実際に描画するときと同じ折り返し結果を返す"""
     return wrap_text(f"{prefix}{value}", usable_width, font, size)
 
-def block_text_height(prefix: str, value: str, usable_width: float, font: str, size: int, line_h: int):
-    return len(wrapped_lines(prefix, value, usable_width, font, size)) * line_h
+def format_record_to_text(row: pd.Series) -> str:
+    q = safe_get(row, ["問題文","設問","問題","本文"])
+    parts = [f"問題文: {q}"]
+    for i in range(1, 6):
+        choice = safe_get(row, [f"選択肢{i}"])
+        if choice:
+            parts.append(f"選択肢{i}: {choice}")
+    parts.append(f"正解: {safe_get(row, ['正解','解答','答え'])}")
+    parts.append(f"分類: {safe_get(row, ['科目分類','分類','科目'])}")
+    link = safe_get(row, ["リンクURL","画像URL","画像リンク","リンク","画像Link"])
+    if link:
+        parts.append(f"画像リンク: {convert_google_drive_link(link)}（PDFに画像表示）")
+    return "\n".join(parts)
+
+# ===== TXT ダウンロード =====
+txt_buffer = io.StringIO()
+for _, row in df_filtered.iterrows():
+    txt_buffer.write(format_record_to_text(row))
+    txt_buffer.write("\n\n" + "-"*40 + "\n\n")
+st.download_button(
+    label="📄 ヒット結果をTEXTダウンロード",
+    data=txt_buffer.getvalue(),
+    file_name=f"{file_prefix}.txt",
+    mime="text/plain"
+)
 
 # ===== PDF 作成（ページ先頭は必ず問題文から／画像は必ず表示）=====
 def create_pdf(records, progress=None, status=None, start_time=None):
@@ -138,11 +198,8 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     c.setFont(JAPANESE_FONT, 12)
     width, height = A4
 
-    # 余白とレイアウト
-    top_margin = 40
-    bottom_margin = 60
-    left_margin = 40
-    right_margin = 40
+    top_margin, bottom_margin = 40, 60
+    left_margin, right_margin = 40, 40
     usable_width = width - left_margin - right_margin
     page_usable_h = (height - top_margin) - bottom_margin
     line_h = 18
@@ -160,154 +217,117 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         c.setFont(JAPANESE_FONT, 12)
         y = height - top_margin
 
-    def ensure_space(need_h):
-        """必要高さが無ければ改ページ"""
-        nonlocal y
-        if y - need_h < bottom_margin:
-            new_page()
-
     def draw_wrapped_lines(lines):
-        """折り返し済み配列を描画（ページまたぎNG：呼ぶ前に高さチェック）"""
         nonlocal y
         for ln in lines:
             c.drawString(left_margin, y, ln)
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
-        q = str(row.get("問題文", ""))
-        # --- 選択肢を収集 ---
+        q = safe_get(row, ["問題文","設問","問題","本文"])
+
+        # 選択肢
         choices = []
         for i in range(1, 6):
-            val = row.get(f"選択肢{i}", "")
-            if pd.notna(val) and str(val).strip():
-                choices.append((i, str(val)))
+            v = safe_get(row, [f"選択肢{i}"])
+            if v:
+                choices.append((i, v))
 
-        ans = str(row.get("正解", ""))
-        cat = str(row.get("科目分類", ""))
+        ans = safe_get(row, ["正解","解答","答え"])
+        cat = safe_get(row, ["科目分類","分類","科目"])
 
-        # --- 画像の事前取得＆スケール見積り（ページ有効領域に収まるサイズ）---
+        # 画像の事前取得
         pil = None
         img_est_h = 0
-        link_raw = row.get("リンクURL", None)
-        if pd.notna(link_raw) and str(link_raw).strip():
+        link_raw = safe_get(row, ["リンクURL","画像URL","画像リンク","リンク"])
+        if link_raw:
             try:
-                image_url = convert_google_drive_link(str(link_raw).strip())
+                image_url = convert_google_drive_link(link_raw)
                 resp = requests.get(image_url, timeout=5)
                 pil = Image.open(io.BytesIO(resp.content)).convert("RGB")
                 iw, ih = pil.size
-                scale_to_width  = usable_width / iw
-                scale_to_height = page_usable_h / ih
-                base_scale = min(scale_to_width, scale_to_height, 1.0)
-                nw, nh = iw * base_scale, ih * base_scale
-                img_est_h = nh + 20  # 余白込み
+                scale = min(usable_width / iw, page_usable_h / ih, 1.0)
+                nw, nh = iw * scale, ih * scale
+                img_est_h = nh + 20
             except Exception:
                 pil = None
-                img_est_h = block_text_height("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12, line_h)
+                img_est_h = wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12)
+                img_est_h = len(img_est_h) * line_h
 
-        # --- このレコード全体の高さを見積もる（テキストはすべて1ページ内に収める前提）---
+        # 高さ見積り
         est_h = 0
         q_lines = wrapped_lines("問題文: ", q, usable_width, JAPANESE_FONT, 12)
         est_h += len(q_lines) * line_h
-
         choice_lines_list = []
         for i, v in choices:
             ls = wrapped_lines(f"選択肢{i}: ", v, usable_width, JAPANESE_FONT, 12)
             choice_lines_list.append(ls)
             est_h += len(ls) * line_h
-
-        # 画像高さ（ある場合）
         est_h += img_est_h if img_est_h else 0
-
         ans_lines = wrapped_lines("正解: ", ans, usable_width, JAPANESE_FONT, 12)
         cat_lines = wrapped_lines("分類: ", cat, usable_width, JAPANESE_FONT, 12)
-        est_h += len(ans_lines) * line_h
-        est_h += len(cat_lines) * line_h
+        est_h += len(ans_lines) * line_h + len(cat_lines) * line_h + 20
 
-        est_h += 20  # 区切りの余白
-
-        # --- ページ先頭を必ず「問題文」から始めるため、足りなければ改ページ ---
+        # ページ先頭を必ず問題文から
         if y - est_h < bottom_margin:
             new_page()
 
-        # --- 実際の描画（このページから始める）---
-        # 問題文
+        # 描画
         draw_wrapped_lines(q_lines)
-
-        # 選択肢
         for ls in choice_lines_list:
             draw_wrapped_lines(ls)
 
-        # 画像（必ず表示）
         if pil is not None:
             try:
                 iw, ih = pil.size
-                scale_to_width  = usable_width / iw
-                scale_to_height = page_usable_h / ih
-                base_scale = min(scale_to_width, scale_to_height, 1.0)
-                nw, nh = iw * base_scale, ih * base_scale
-
-                # 残り高さが足りなければ次ページへ送る（画像は分割しない）
+                scale = min(usable_width / iw, page_usable_h / ih, 1.0)
+                nw, nh = iw * scale, ih * scale
                 if y - nh < bottom_margin:
                     new_page()
-
-                # 念のため最終調整（このページの残りに合わせる）
                 remaining = y - bottom_margin
                 if nh > remaining:
                     adj = remaining / nh
                     nw, nh = nw * adj, nh * adj
-
                 img_io = io.BytesIO()
                 pil.save(img_io, format="PNG")
                 img_io.seek(0)
                 img_reader = ImageReader(img_io)
-
-                c.drawImage(img_reader, left_margin, y - nh,
-                            width=nw, height=nh, preserveAspectRatio=True, mask='auto')
+                c.drawImage(img_reader, left_margin, y - nh, width=nw, height=nh, preserveAspectRatio=True, mask='auto')
                 y -= nh + 20
             except Exception as e:
                 err_lines = wrapped_lines("", f"[画像読み込み失敗: {e}]", usable_width, JAPANESE_FONT, 12)
                 draw_wrapped_lines(err_lines)
         else:
-            # 画像リンクがあるが取得失敗した場合の文言
-            if pd.notna(link_raw) and str(link_raw).strip():
+            if link_raw:
                 draw_wrapped_lines(wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12))
 
-        # 正解・分類
         draw_wrapped_lines(ans_lines)
         draw_wrapped_lines(cat_lines)
 
-        # 区切り
         if y - 20 < bottom_margin:
             new_page()
         else:
             y -= 20
 
-        # 進捗表示
-        if progress is not None:
-            progress.progress(min(idx / max(total, 1), 1.0))
-        if status is not None and start_time is not None:
-            elapsed = time.time() - start_time
-            avg = elapsed / idx
-            remaining = max(total - idx, 0) * avg
-            status.text(f"PDF作成中… {idx}/{total}  経過 {fmt(elapsed)}  残り目安 {fmt(remaining)}")
+        if st.session_state.get("progress_on"):
+            st.session_state["progress"].progress(min(idx / max(total, 1), 1.0))
 
     c.save()
     pdf_buffer.seek(0)
     return pdf_buffer.getvalue()
 
-# ===== PDF 生成（押した時だけ）=====
+# ===== PDF 生成 =====
 if "pdf_bytes" not in st.session_state:
     st.session_state["pdf_bytes"] = None
 
 if st.button("🖨️ PDFを作成（画像付き）"):
-    progress_bar = st.progress(0.0)
-    status = st.empty()
+    st.session_state["progress_on"] = True
+    st.session_state["progress"] = st.progress(0.0)
     start = time.time()
     with st.spinner("PDFを作成中…"):
-        st.session_state["pdf_bytes"] = create_pdf(
-            df_filtered, progress=progress_bar, status=status, start_time=start
-        )
-    status.text("✅ PDF作成完了！")
+        st.session_state["pdf_bytes"] = create_pdf(df_filtered)
+    st.session_state["progress_on"] = False
+    st.success("✅ PDF作成完了！")
 
 if st.session_state["pdf_bytes"] is not None:
     st.download_button(
@@ -317,30 +337,34 @@ if st.session_state["pdf_bytes"] is not None:
         mime="application/pdf"
     )
 
-# ===== 画面の一覧（画像はリンクのみ／正解は初期非表示でトグル）=====
+# ===== 画面の一覧（正解は初期非表示）=====
 st.markdown("### 🔍 ヒットした問題一覧")
 for i, (_, record) in enumerate(df_filtered.iterrows()):
-    with st.expander(f"{i+1}. {record['問題文'][:50]}..."):
+    title = safe_get(record, ["問題文","設問","問題","本文"])
+    with st.expander(f"{i+1}. {title[:50]}..."):
         st.markdown("### 📝 問題文")
-        st.write(record["問題文"])
+        st.write(title)
 
         st.markdown("### ✏️ 選択肢")
         for j in range(1, 6):
-            if pd.notna(record.get(f"選択肢{j}", None)):
-                st.write(f"- {record[f'選択肢{j}']}")
+            val = safe_get(record, [f"選択肢{j}"])
+            if val:
+                st.write(f"- {val}")
 
-        # ✅ 正解は初期非表示（クリックで表示）
         show_ans = st.checkbox("正解を表示する", key=f"show_answer_{i}", value=False)
         if show_ans:
-            st.markdown(f"**✅ 正解:** {record['正解']}")
+            st.markdown(f"**✅ 正解:** {safe_get(record, ['正解','解答','答え'])}")
         else:
             st.markdown("**✅ 正解:** |||（クリックで表示）|||")
 
-        # 分類はそのまま表示（必要なら同様に隠すことも可）
-        st.markdown(f"**📚 分類:** {record['科目分類']}")
+        st.markdown(f"**📚 分類:** {safe_get(record, ['科目分類','分類','科目'])}")
 
-        if pd.notna(record.get("リンクURL", None)) and str(record["リンクURL"]).strip() != "":
-            image_url = convert_google_drive_link(record["リンクURL"])
-            st.markdown(f"[画像リンクはこちら]({image_url})")
+        link = safe_get(record, ["リンクURL","画像URL","画像リンク","リンク"])
+        if link:
+            st.markdown(f"[画像リンクはこちら]({convert_google_drive_link(link)})")
         else:
             st.write("（画像リンクはありません）")
+
+# デバッグ補助（必要時だけ展開）
+with st.expander("🔧 現在の列名（正規化後）"):
+    st.write(list(df.columns))
