@@ -366,5 +366,5 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
             st.write("（画像リンクはありません）")
 
 # デバッグ補助（必要時だけ展開）
-with st.expander("🔧 現在の列名（正規化後）"):
-    st.write(list(df.columns))
+#with st.expander("🔧 現在の列名（正規化後）"):
+#    st.write(list(df.columns))
