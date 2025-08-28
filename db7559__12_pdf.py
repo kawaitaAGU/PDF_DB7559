@@ -14,70 +14,88 @@ import time
 from pathlib import Path
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 import re
+import hashlib
 
 # =========================
 # フォント設定
-#  - ベース: 日本語を含む本文用（IPAex or HeiseiKakuGo-W5）
-#  - フォールバック: 歯式記号などの特殊記号用（DejaVuSans / NotoSansSymbols2）
+#  - ベース: 日本語本文用（IPAex or HeiseiKakuGo-W5）
+#  - フォールバック: 歯式記号など（DejaVuSans / NotoSansSymbols2）
+#  - クラウドでも動くよう、なければダウンロード
 # =========================
-SYM_FALLBACK_NAME = "SymFallback"  # グローバルで参照
+SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
+
+def _download_if_missing(url: str, dest: Path, sha256: str | None = None):
+    """フォントが無ければダウンロード保存。任意でSHA256検証。"""
+    if dest.exists():
+        return dest
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    r = requests.get(url, timeout=20)
+    r.raise_for_status()
+    data = r.content
+    if sha256:
+        h = hashlib.sha256(data).hexdigest()
+        if h != sha256:
+            raise RuntimeError(f"SHA256 mismatch for {url}")
+    dest.write_bytes(data)
+    return dest
 
 def _setup_font():
-    """本文用フォント + 記号フォールバックを登録して、本文フォント名を返す"""
+    """本文用フォント＋記号フォールバックを登録し、本文フォント名を返す"""
     here = Path(__file__).parent
+    fonts_dir = here / "fonts"
+    fonts_dir.mkdir(exist_ok=True)
 
-    # --- 本文用（日本語含む）
-    base_candidates = [
-        here / "fonts" / "IPAexGothic.ttf",
-        here / "IPAexGothic.ttf",
-        Path.cwd() / "fonts" / "IPAexGothic.ttf",
-        Path.cwd() / "IPAexGothic.ttf",
-    ]
-    base_font = None
-    for p in base_candidates:
+    # ---- 本文（日本語OK）: IPAex があればTTF、無ければCID
+    base_font_name = None
+    for p in [fonts_dir / "IPAexGothic.ttf", here / "IPAexGothic.ttf"]:
         if p.exists():
             pdfmetrics.registerFont(TTFont("BaseJP", str(p)))
-            base_font = "BaseJP"
+            base_font_name = "BaseJP"
             break
-    if base_font is None:
-        # 最低限、日本語が出るCIDフォントへ
+    if base_font_name is None:
         pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
-        base_font = "HeiseiKakuGo-W5"
+        base_font_name = "HeiseiKakuGo-W5"
 
-    # --- 記号フォールバック（歯式コーナー記号 ⌜⌝⌞⌟ など）
-    sym_candidates = [
-        here / "fonts" / "DejaVuSans.ttf",
-        here / "DejaVuSans.ttf",
-        Path("/System/Library/Fonts/Supplemental/DejaVuSans.ttf"),     # macOS
-        Path("C:/Windows/Fonts/DejaVuSans.ttf"),                       # Windows（置いた場合）
-        here / "fonts" / "NotoSansSymbols2-Regular.ttf",
-        here / "NotoSansSymbols2-Regular.ttf",
-    ]
-    sym_font_set = False
-    for p in sym_candidates:
+    # ---- 歯式記号用フォールバック: DejaVuSans or NotoSansSymbols2
+    sym_ok = False
+    for p in [fonts_dir / "DejaVuSans.ttf", fonts_dir / "NotoSansSymbols2-Regular.ttf"]:
         if p.exists():
             pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-            sym_font_set = True
+            sym_ok = True
             break
-    if not sym_font_set:
-        # 見つからなくても処理継続（この場合は記号が化ける可能性あり）
-        pass
+    if not sym_ok:
+        # DejaVu Sans を優先取得（公式リポの固定版）
+        try:
+            dejavu_url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans.ttf"
+            p = _download_if_missing(dejavu_url, fonts_dir / "DejaVuSans.ttf")
+            pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
+            sym_ok = True
+        except Exception:
+            # 予備: Noto Sans Symbols2
+            try:
+                noto_url = "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansSymbols2/NotoSansSymbols2-Regular.ttf"
+                p = _download_if_missing(noto_url, fonts_dir / "NotoSansSymbols2-Regular.ttf")
+                pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
+                sym_ok = True
+            except Exception:
+                pass  # なくても処理継続（その場合は記号が豆腐の可能性）
 
-    return base_font
+    return base_font_name
 
 JAPANESE_FONT = _setup_font()
 
-# 歯式で使いそうな記号セット（必要に応じて追加）
-PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")  # コーナー/プライム/和文傍点など
+# 歯式で使いそうな記号（必要に応じて追加）
+PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
     """
-    ReportLab は自動フォントフォールバックが無いので、
+    ReportLabは自動フォールバックが無いので、
     文字単位でベース/記号フォントを切替えて描画する。
     """
     pen_x = x
     buf = ""
     cur_font = base_font
+    registered = set(pdfmetrics.getRegisteredFontNames())
 
     def flush(seg, font_name):
         nonlocal pen_x
@@ -88,9 +106,8 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
         pen_x += stringWidth(seg, font_name, size)
 
     for ch in (text or ""):
-        # 記号用フォントが登録されている場合のみ切替
-        target = (sym_font if (ch in PALMER_SYMBOLS and sym_font in pdfmetrics.getRegisteredFontNames())
-                  else base_font)
+        use_sym = (ch in PALMER_SYMBOLS) and (sym_font in registered)
+        target = sym_font if use_sym else base_font
         if target != cur_font:
             flush(buf, cur_font)
             buf = ch
@@ -98,9 +115,11 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
         else:
             buf += ch
     flush(buf, cur_font)
-    # ベースに戻す
-    c.setFont(base_font, size)
+    c.setFont(base_font, size)  # 戻す
 
+# =========================
+# ここから従来のアプリロジック
+# =========================
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
 
@@ -161,7 +180,6 @@ def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 # ===== データ読み込み =====
-# BOM 対策のため utf-8-sig、文字列で統一して取り込み
 df = pd.read_csv("97_118DB.csv", dtype=str, encoding="utf-8-sig")
 df = df.fillna("")
 df = normalize_columns(df)
@@ -274,8 +292,6 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     y = height - top_margin
 
     total = len(records)
-
-    # 追加：start_timeが未指定ならここで取得（安全策）
     if start_time is None:
         start_time = time.time()
 
@@ -292,7 +308,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            # ★ここだけ変更：フォールバック付き描画
+            # フォールバック付き描画
             draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)
             y -= line_h
 
@@ -382,7 +398,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         else:
             y -= 20
 
-        # === 進捗＆ETAの更新（そのまま） ===
+        # === 進捗＆ETA ===
         if st.session_state.get("progress_on"):
             st.session_state["progress"].progress(min(idx / max(total, 1), 1.0))
             elapsed = time.time() - start_time
@@ -454,7 +470,3 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
             st.markdown(f"[画像リンクはこちら]({convert_google_drive_link(link)})")
         else:
             st.write("（画像リンクはありません）")
-
-# デバッグ補助（必要時だけ展開）
-# with st.expander("🔧 現在の列名（正規化後）"):
-#     st.write(list(df.columns))
