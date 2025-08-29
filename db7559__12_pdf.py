@@ -25,10 +25,11 @@ SYM_FALLBACK_NAME = "SymFallback"  # グローバルで参照
 def _setup_font():
     """本文用フォント + 記号フォールバックを登録して、本文フォント名を返す"""
     here = Path(__file__).parent
+    fonts_dir = here / "fonts"
 
     # --- 本文用（日本語含む）
     base_candidates = [
-        here / "fonts" / "IPAexGothic.ttf",
+        fonts_dir / "IPAexGothic.ttf",
         here / "IPAexGothic.ttf",
         Path.cwd() / "fonts" / "IPAexGothic.ttf",
         Path.cwd() / "IPAexGothic.ttf",
@@ -45,22 +46,19 @@ def _setup_font():
         base_font = "HeiseiKakuGo-W5"
 
     # --- 記号フォールバック（歯式コーナー/アーチ記号 など）
-    # 置いた実ファイル名をそのまま書いてOK。Unifont が一番確実。
+    # 置いた実ファイル名をそのまま書いてOK。Unifont があると確実に出る
     sym_candidates = [
-        here / "fonts" / "unifont-15.1.05.ttf",               # ← ここに置けばリネーム不要
-        here / "fonts" / "Unifont.ttf",                       # （別名で置いた場合）
-        here / "fonts" / "NotoSansSymbols2-Regular.ttf",
-        here / "fonts" / "DejaVuSans.ttf",
+        fonts_dir / "Unifont.otf",                          # ← あなたが置いたファイル
+        fonts_dir / "NotoSansSymbols2-Regular.ttf",
+        fonts_dir / "DejaVuSans.ttf",
         here / "NotoSansSymbols2-Regular.ttf",
         here / "DejaVuSans.ttf",
         Path("/System/Library/Fonts/Supplemental/DejaVuSans.ttf"),  # macOS
         Path("C:/Windows/Fonts/DejaVuSans.ttf"),                    # Windows（置いた場合）
     ]
-    sym_font_set = False
     for p in sym_candidates:
         if p.exists():
             pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-            sym_font_set = True
             break
     # 見つからなくても処理継続（この場合は記号が化ける可能性あり）
 
