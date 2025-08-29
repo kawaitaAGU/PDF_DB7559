@@ -207,10 +207,6 @@ def create_pdf(records, progress=None, status=None, start_time=None):
 
     total = len(records)
 
-    # 追加：start_timeが未指定ならここで取得（安全策）
-    if start_time is None:
-        start_time = time.time()
-
     def fmt(sec):
         m = int(sec // 60); s = int(sec % 60)
         return f"{m:02d}:{s:02d}"
@@ -313,16 +309,8 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         else:
             y -= 20
 
-        # === 進捗＆ETAの更新（追加） ===
         if st.session_state.get("progress_on"):
             st.session_state["progress"].progress(min(idx / max(total, 1), 1.0))
-            elapsed = time.time() - start_time
-            avg_per_item = elapsed / idx if idx > 0 else 0
-            remaining = max(total - idx, 0) * avg_per_item
-            if "eta_placeholder" in st.session_state:
-                st.session_state["eta_placeholder"].markdown(
-                    f"⏳ 残り目安: **{fmt(remaining)}**（経過 {fmt(elapsed)} / {idx}/{total} 件）"
-                )
 
     c.save()
     pdf_buffer.seek(0)
@@ -335,19 +323,10 @@ if "pdf_bytes" not in st.session_state:
 if st.button("🖨️ PDFを作成（画像付き）"):
     st.session_state["progress_on"] = True
     st.session_state["progress"] = st.progress(0.0)
-    # 追加：ETA表示用プレースホルダ
-    st.session_state["eta_placeholder"] = st.empty()
-
     start = time.time()
     with st.spinner("PDFを作成中…"):
-        st.session_state["pdf_bytes"] = create_pdf(df_filtered, start_time=start)
+        st.session_state["pdf_bytes"] = create_pdf(df_filtered)
     st.session_state["progress_on"] = False
-
-    # 追加：完了時の合計時間を表示
-    total_sec = time.time() - start
-    st.session_state["eta_placeholder"].markdown(
-        f"✅ 完了：合計 **{int(total_sec//60):02d}:{int(total_sec%60):02d}**"
-    )
     st.success("✅ PDF作成完了！")
 
 if st.session_state["pdf_bytes"] is not None:
@@ -388,4 +367,4 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
 
 # デバッグ補助（必要時だけ展開）
 #with st.expander("🔧 現在の列名（正規化後）"):
-#    st.write(list(df.columns))
+#   st.write(list(df.columns))
