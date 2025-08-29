@@ -18,6 +18,8 @@ import unicodedata as _ud
 
 # =========================
 # フォント設定（同梱前提）
+#  Base : IPAexGothic.ttf（本文）
+#  Fallback: NotoSansSymbols2-Regular.ttf（歯科記号 ⏌⏋ ほか）→ DejaVuSans.ttf
 # =========================
 SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
 
@@ -27,8 +29,7 @@ def _setup_font():
     fonts_dir = here / "fonts"
     fonts_dir.mkdir(exist_ok=True)
 
-    # 本文用（日本語）
-    base_font_name = None
+    # 本文（日本語）
     ipa = fonts_dir / "IPAexGothic.ttf"
     if ipa.exists():
         pdfmetrics.registerFont(TTFont("BaseJP", str(ipa)))
@@ -38,33 +39,40 @@ def _setup_font():
         base_font_name = "HeiseiKakuGo-W5"
         st.warning("⚠️ fonts/IPAexGothic.ttf が見つからないため HeiseiKakuGo-W5 にフォールバックします。")
 
-    # 記号用（歯式・枠線・技術記号）
-    sym = fonts_dir / "DejaVuSans.ttf"
-    if sym.exists():
-        pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(sym)))
+    # 記号フォールバック（歯式記号を最優先で拾う）
+    sym_candidates = [
+        fonts_dir / "NotoSansSymbols2-Regular.ttf",
+        here / "NotoSansSymbols2-Regular.ttf",
+        Path("/System/Library/Fonts/Supplemental/NotoSansSymbols2-Regular.ttf"),
+        Path("C:/Windows/Fonts/NotoSansSymbols2-Regular.ttf"),
+        fonts_dir / "DejaVuSans.ttf",
+        here / "DejaVuSans.ttf",
+    ]
+    for p in sym_candidates:
+        if p.exists():
+            pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
+            break
     else:
-        st.error("❌ 歯式記号用の fonts/DejaVuSans.ttf が見つかりません。リポの fonts/ に配置してください。")
+        st.error("❌ 記号用フォントが見つかりません。`fonts/NotoSansSymbols2-Regular.ttf` を配置してください。")
 
     return base_font_name
 
 JAPANESE_FONT = _setup_font()
 
-# ========= 記号判定 =========
+# ========= 記号判定（ここで NotoSymbols2 に振る）=========
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
-    """DejaVuSansで描いた方が安全な文字か判定"""
     cp = ord(ch)
     if ch in PALMER_SYMBOLS:
         return True
-    # 歯式で出がちな記号ブロック
     ranges = [
-        (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘ …
+        (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘
         (0x2580, 0x259F),  # Block Elements
-        (0x25A0, 0x25FF),  # Geometric Shapes ■ ▲ ● …
-        (0x2190, 0x21FF),  # Arrows ← → ↔ ↕ …
-        (0x2300, 0x23FF),  # Misc Technical ⌜ ⌝ ⌞ ⌟ …
-        (0x2200, 0x22FF),  # Mathematical Operators ∣ ≤ ≥ …
+        (0x25A0, 0x25FF),  # Geometric Shapes
+        (0x2190, 0x21FF),  # Arrows
+        (0x2300, 0x23FF),  # Misc Technical  ⏌⏋ など歯科記号を含む
+        (0x2200, 0x22FF),  # Mathematical Operators
         (0x2070, 0x209F),  # Superscripts/Subscripts
         (0x02B0, 0x02FF),  # Modifier Letters
         (0x0300, 0x036F),  # Combining Marks
@@ -79,7 +87,7 @@ def _needs_symbol_font(ch: str) -> bool:
     return False
 
 def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
-    """1行分を、必要に応じて記号フォントへ切替えて描画"""
+    """文字単位でベース/記号フォントを切替えて1行描画"""
     pen_x = x
     buf = ""
     cur_font = base_font
@@ -106,19 +114,19 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
     c.setFont(base_font, size)
 
 # =========================
-# ここから従来のアプリ
+# アプリ本体
 # =========================
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
 
-# フォント確認・特殊文字診断
+# フォント確認＆特殊文字診断
 with st.expander("🧪 フォント登録確認 / 特殊文字診断", expanded=False):
     cols = st.columns(2)
     with cols[0]:
         if st.button("登録済みフォントを表示"):
             st.write(sorted(pdfmetrics.getRegisteredFontNames()))
     with cols[1]:
-        st.caption("ヒット最初の1件から日本語・英数以外の文字を抽出します")
+        st.caption("ヒット1件目から日本語・英数以外の文字を抽出して表示します")
         if st.button("特殊文字を抽出"):
             if "df_filtered" in st.session_state and len(st.session_state["df_filtered"]) > 0:
                 import unicodedata as ud
@@ -301,7 +309,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)  # フォールバック描画
+            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
