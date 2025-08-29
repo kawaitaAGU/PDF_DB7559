@@ -18,8 +18,6 @@ import unicodedata as _ud
 
 # =========================
 # フォント設定（同梱前提）
-#  - Base: IPAexGothic.ttf（なければ HeiseiKakuGo-W5）
-#  - Symbols: DejaVuSans.ttf（歯式・枠線・技術記号など）
 # =========================
 SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
 
@@ -36,7 +34,6 @@ def _setup_font():
         pdfmetrics.registerFont(TTFont("BaseJP", str(ipa)))
         base_font_name = "BaseJP"
     else:
-        # 最低限のフォールバック（Glyph足りない場合あり）
         pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
         base_font_name = "HeiseiKakuGo-W5"
         st.warning("⚠️ fonts/IPAexGothic.ttf が見つからないため HeiseiKakuGo-W5 にフォールバックします。")
@@ -52,30 +49,30 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
-# ========= 記号判定（ここが肝）=========
-# 個別に拾っておきたい記号（Palmer コーナーなど）
+# ========= 記号判定 =========
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
-    """DejaVuSansで描いた方が安全な文字かどうかを判定"""
+    """DejaVuSansで描いた方が安全な文字か判定"""
     cp = ord(ch)
     if ch in PALMER_SYMBOLS:
         return True
-    # よく使う記号ブロック（歯式で出がち）
+    # 歯式で出がちな記号ブロック
     ranges = [
         (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘ …
         (0x2580, 0x259F),  # Block Elements
         (0x25A0, 0x25FF),  # Geometric Shapes ■ ▲ ● …
         (0x2190, 0x21FF),  # Arrows ← → ↔ ↕ …
         (0x2300, 0x23FF),  # Misc Technical ⌜ ⌝ ⌞ ⌟ …
+        (0x2200, 0x22FF),  # Mathematical Operators ∣ ≤ ≥ …
         (0x2070, 0x209F),  # Superscripts/Subscripts
         (0x02B0, 0x02FF),  # Modifier Letters
-        (0x0300, 0x036F),  # Combining Diacritical Marks
+        (0x0300, 0x036F),  # Combining Marks
+        (0xFFE0, 0xFFEE),  # 全角記号の一部（保険）
     ]
     for a, b in ranges:
         if a <= cp <= b:
             return True
-    # 記号カテゴリー（Sm/So/Sk）も基本フォールバック
     cat = _ud.category(ch)
     if cat in {"Sm", "So", "Sk"}:
         return True
@@ -106,18 +103,38 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
         else:
             buf += ch
     flush(buf, cur_font)
-    c.setFont(base_font, size)  # 戻す
+    c.setFont(base_font, size)
 
 # =========================
-# ここから従来のアプリロジック
+# ここから従来のアプリ
 # =========================
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
 
-# （任意）フォント登録確認ボタン
-with st.expander("🧪 フォント登録確認", expanded=False):
-    if st.button("登録済みフォントを表示"):
-        st.write(sorted(pdfmetrics.getRegisteredFontNames()))
+# フォント確認・特殊文字診断
+with st.expander("🧪 フォント登録確認 / 特殊文字診断", expanded=False):
+    cols = st.columns(2)
+    with cols[0]:
+        if st.button("登録済みフォントを表示"):
+            st.write(sorted(pdfmetrics.getRegisteredFontNames()))
+    with cols[1]:
+        st.caption("ヒット最初の1件から日本語・英数以外の文字を抽出します")
+        if st.button("特殊文字を抽出"):
+            if "df_filtered" in st.session_state and len(st.session_state["df_filtered"]) > 0:
+                import unicodedata as ud
+                txt = st.session_state["diagnostic_text"]
+                specials = []
+                for ch in txt:
+                    if ch.isalnum() or ch in " 　、。・，．()（）[]【】{}｛｝:：;；!?！？+-/％%．,．":
+                        continue
+                    try:
+                        name = ud.name(ch)
+                    except Exception:
+                        name = "(no name)"
+                    specials.append({"char": ch, "U+": f"U+{ord(ch):04X}", "name": name})
+                st.write(specials if specials else "特殊文字は見つかりませんでした。")
+            else:
+                st.write("まず検索してヒットを出してください。")
 
 # ===== 列名正規化 & 安全取得 =====
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -195,6 +212,10 @@ df_filtered = df[df.apply(
     axis=1
 )]
 df_filtered = df_filtered.reset_index(drop=True)
+
+# 診断用テキスト保存
+st.session_state["df_filtered"] = df_filtered
+st.session_state["diagnostic_text"] = row_text(df_filtered.iloc[0]) if len(df_filtered) > 0 else ""
 
 st.info(f"{len(df_filtered)}件ヒットしました")
 
@@ -280,7 +301,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)  # ← フォールバック描画
+            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)  # フォールバック描画
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
