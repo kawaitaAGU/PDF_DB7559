@@ -21,7 +21,7 @@ import unicodedata as _ud
 #  Base : IPAexGothic.ttf（本文）
 #  Fallback: NotoSansSymbols2-Regular.ttf（歯科記号 ⏌⏋ ほか）→ DejaVuSans.ttf
 # =========================
-SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
+SYM_FALLBACK_NAME = "SymFallback"
 
 def _setup_font():
     here = Path(__file__).parent
@@ -38,7 +38,7 @@ def _setup_font():
         base_font_name = "HeiseiKakuGo-W5"
         st.warning("⚠️ fonts/IPAexGothic.ttf が見つからないため HeiseiKakuGo-W5 にフォールバックします。")
 
-    # 記号フォールバック（歯式記号を最優先で拾う）
+    # 記号フォールバック
     sym_candidates = [
         fonts_dir / "NotoSansSymbols2-Regular.ttf",
         here / "NotoSansSymbols2-Regular.ttf",
@@ -58,7 +58,7 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
-# ========= 記号判定（ここで シンボル用フォント に振る）=========
+# ========= 記号判定（ここでシンボル用フォントへ振る）=========
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
@@ -66,16 +66,16 @@ def _needs_symbol_font(ch: str) -> bool:
     if ch in PALMER_SYMBOLS:
         return True
     ranges = [
-        (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘
+        (0x2500, 0x257F),  # Box Drawing
         (0x2580, 0x259F),  # Block Elements
         (0x25A0, 0x25FF),  # Geometric Shapes
         (0x2190, 0x21FF),  # Arrows
-        (0x2300, 0x23FF),  # Misc Technical  ⏌⏋ など
-        (0x2200, 0x22FF),  # Mathematical Operators
-        (0x2070, 0x209F),  # Superscripts/Subscripts
+        (0x2300, 0x23FF),  # Misc Technical（⏌⏋ を含む）
+        (0x2200, 0x22FF),  # Math Operators
+        (0x2070, 0x209F),  # Sup/Sup
         (0x02B0, 0x02FF),  # Modifier Letters
-        (0x0300, 0x036F),  # Combining Marks
-        (0xFFE0, 0xFFEE),  # 全角記号（一部保険）
+        (0x0300, 0x036F),  # Combining
+        (0xFFE0, 0xFFEE),  # 全角記号（保険）
     ]
     for a, b in ranges:
         if a <= cp <= b:
@@ -112,11 +112,11 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
     flush(buf, cur_font)
     c.setFont(base_font, size)
 
-# ====== PDF用 安全置換（ここが今回の“確実表示”ポイント）======
-#   ⏋(U+23C9) → ┐(U+2510) / ⏌(U+23CA) → ┘(U+2518)
+# ====== PDF用 安全置換（“確実表示”用）======
+#   ⏋(U+23C9) → ┘(U+2518) / ⏌(U+23CA) → ┐(U+2510)  ← 向きを修正
 DENTAL_TO_BOX = {
-    "\u23C9": "\u2510",  # ⏋ -> ┐  (右上コーナー相当)
-    "\u23CA": "\u2518",  # ⏌ -> ┘  (右下コーナー相当)
+    "\u23C9": "\u2518",  # ⏋ -> ┘  右下
+    "\u23CA": "\u2510",  # ⏌ -> ┐  右上
 }
 def _normalize_symbols_for_pdf(s: str) -> str:
     if not s:
