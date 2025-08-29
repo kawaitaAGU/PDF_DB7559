@@ -24,7 +24,6 @@ import unicodedata as _ud
 SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
 
 def _setup_font():
-    """同梱フォントを登録して本文フォント名を返す（ダウンロードは行わない）"""
     here = Path(__file__).parent
     fonts_dir = here / "fonts"
     fonts_dir.mkdir(exist_ok=True)
@@ -59,7 +58,7 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
-# ========= 記号判定（ここで NotoSymbols2 に振る）=========
+# ========= 記号判定（ここで シンボル用フォント に振る）=========
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
@@ -71,12 +70,12 @@ def _needs_symbol_font(ch: str) -> bool:
         (0x2580, 0x259F),  # Block Elements
         (0x25A0, 0x25FF),  # Geometric Shapes
         (0x2190, 0x21FF),  # Arrows
-        (0x2300, 0x23FF),  # Misc Technical  ⏌⏋ など歯科記号を含む
+        (0x2300, 0x23FF),  # Misc Technical  ⏌⏋ など
         (0x2200, 0x22FF),  # Mathematical Operators
         (0x2070, 0x209F),  # Superscripts/Subscripts
         (0x02B0, 0x02FF),  # Modifier Letters
         (0x0300, 0x036F),  # Combining Marks
-        (0xFFE0, 0xFFEE),  # 全角記号の一部（保険）
+        (0xFFE0, 0xFFEE),  # 全角記号（一部保険）
     ]
     for a, b in ranges:
         if a <= cp <= b:
@@ -112,6 +111,17 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
             buf += ch
     flush(buf, cur_font)
     c.setFont(base_font, size)
+
+# ====== PDF用 安全置換（ここが今回の“確実表示”ポイント）======
+#   ⏋(U+23C9) → ┐(U+2510) / ⏌(U+23CA) → ┘(U+2518)
+DENTAL_TO_BOX = {
+    "\u23C9": "\u2510",  # ⏋ -> ┐  (右上コーナー相当)
+    "\u23CA": "\u2518",  # ⏌ -> ┘  (右下コーナー相当)
+}
+def _normalize_symbols_for_pdf(s: str) -> str:
+    if not s:
+        return s
+    return "".join(DENTAL_TO_BOX.get(ch, ch) for ch in s)
 
 # =========================
 # アプリ本体
@@ -246,8 +256,10 @@ def convert_google_drive_link(url):
     return url
 
 def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
-    s = "" if text is None else str(text)
-    if s == "": return [""]
+    # ★PDF描画では歯科記号を確実に出る記号へ置換
+    s = _normalize_symbols_for_pdf("" if text is None else str(text))
+    if s == "":
+        return [""]
     lines, buf = [], ""
     for ch in s:
         if stringWidth(buf + ch, font_name, font_size) <= max_width:
