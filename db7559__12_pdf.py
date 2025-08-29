@@ -19,7 +19,7 @@ import unicodedata as _ud
 # =========================
 # フォント設定（同梱前提）
 #  Base : IPAexGothic.ttf（本文）
-#  Fallback: NotoSansSymbols2-Regular.ttf（歯科記号 ⏌⏋ ほか）→ DejaVuSans.ttf
+#  Fallback: NotoSansSymbols2-Regular.ttf（歯科記号 ⏊/⏉/⌝/⌟/⌜/⌞ ほか）
 # =========================
 SYM_FALLBACK_NAME = "SymFallback"
 
@@ -44,8 +44,6 @@ def _setup_font():
         here / "NotoSansSymbols2-Regular.ttf",
         Path("/System/Library/Fonts/Supplemental/NotoSansSymbols2-Regular.ttf"),
         Path("C:/Windows/Fonts/NotoSansSymbols2-Regular.ttf"),
-        fonts_dir / "DejaVuSans.ttf",
-        here / "DejaVuSans.ttf",
     ]
     for p in sym_candidates:
         if p.exists():
@@ -59,7 +57,7 @@ def _setup_font():
 JAPANESE_FONT = _setup_font()
 
 # ========= 記号判定（ここでシンボル用フォントへ振る）=========
-PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
+PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⏊⏉⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
     cp = ord(ch)
@@ -70,9 +68,9 @@ def _needs_symbol_font(ch: str) -> bool:
         (0x2580, 0x259F),  # Block Elements
         (0x25A0, 0x25FF),  # Geometric Shapes
         (0x2190, 0x21FF),  # Arrows
-        (0x2300, 0x23FF),  # Misc Technical（⏌⏋ を含む）
+        (0x2300, 0x23FF),  # Misc Technical（⏊/⏉/⌝… を含む）
         (0x2200, 0x22FF),  # Math Operators
-        (0x2070, 0x209F),  # Sup/Sup
+        (0x2070, 0x209F),  # Sup/Sub
         (0x02B0, 0x02FF),  # Modifier Letters
         (0x0300, 0x036F),  # Combining
         (0xFFE0, 0xFFEE),  # 全角記号（保険）
@@ -86,7 +84,7 @@ def _needs_symbol_font(ch: str) -> bool:
     return False
 
 def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
-    """文字単位でベース/記号フォントを切替えて1行描画"""
+    """文字単位でベース/記号フォントを切替えて1行描画（置換はしない＝原文厳密出力）"""
     pen_x = x
     buf = ""
     cur_font = base_font
@@ -112,16 +110,24 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
     flush(buf, cur_font)
     c.setFont(base_font, size)
 
-# ====== PDF用 安全置換（“確実表示”用）======
-#   ⏋(U+23C9) → ┘(U+2518) / ⏌(U+23CA) → ┐(U+2510)  ← 向きを修正
-DENTAL_TO_BOX = {
-    "\u23C9": "\u2518",  # ⏋ -> ┘  右下
-    "\u23CA": "\u2510",  # ⏌ -> ┐  右上
+# ====== （任意）代替表示トグル：フォントが無い環境だけ使う ======
+st.sidebar.markdown("### ⚙️ PDFの歯式記号")
+use_fallback = st.sidebar.checkbox("フォントが無い場合だけ代替記号で描く（┬/┴/┐/┘/┌/└）", value=False)
+
+DENTAL_SAFE_FALLBACK = {
+    # アーチ（両側）
+    "\u23CA": "\u252C",  # ⏊ (UP+HORIZONTAL=上顎) -> ┬
+    "\u23C9": "\u2534",  # ⏉ (DOWN+HORIZONTAL=下顎) -> ┴
+    # 象限（片側）
+    "\u231D": "\u2510",  # 右上 ⌝ -> ┐
+    "\u231F": "\u2518",  # 右下 ⌟ -> ┘
+    "\u231C": "\u250C",  # 左上 ⌜ -> ┌
+    "\u231E": "\u2514",  # 左下 ⌞ -> └
 }
-def _normalize_symbols_for_pdf(s: str) -> str:
-    if not s:
-        return s
-    return "".join(DENTAL_TO_BOX.get(ch, ch) for ch in s)
+def _maybe_fallback_for_pdf(s: str) -> str:
+    if not use_fallback:
+        return s  # 厳密モード：一切置換しない
+    return "".join(DENTAL_SAFE_FALLBACK.get(ch, ch) for ch in (s or ""))
 
 # =========================
 # アプリ本体
@@ -131,7 +137,7 @@ st.title("🔍 学生指導用データベース")
 
 # フォント確認＆特殊文字診断
 with st.expander("🧪 フォント登録確認 / 特殊文字診断", expanded=False):
-    cols = st.columns(2)
+    cols = st.columns(3)
     with cols[0]:
         if st.button("登録済みフォントを表示"):
             st.write(sorted(pdfmetrics.getRegisteredFontNames()))
@@ -139,18 +145,26 @@ with st.expander("🧪 フォント登録確認 / 特殊文字診断", expanded=
         st.caption("ヒット1件目から日本語・英数以外の文字を抽出して表示します")
         if st.button("特殊文字を抽出"):
             if "df_filtered" in st.session_state and len(st.session_state["df_filtered"]) > 0:
-                import unicodedata as ud
                 txt = st.session_state["diagnostic_text"]
                 specials = []
                 for ch in txt:
                     if ch.isalnum() or ch in " 　、。・，．()（）[]【】{}｛｝:：;；!?！？+-/％%．,．":
                         continue
                     try:
-                        name = ud.name(ch)
+                        name = _ud.name(ch)
                     except Exception:
                         name = "(no name)"
                     specials.append({"char": ch, "U+": f"U+{ord(ch):04X}", "name": name})
                 st.write(specials if specials else "特殊文字は見つかりませんでした。")
+            else:
+                st.write("まず検索してヒットを出してください。")
+    with cols[2]:
+        st.caption("PDFに入る文字を確認（先頭120文字）")
+        if st.button("PDFに流す文字を表示"):
+            if "df_filtered" in st.session_state and len(st.session_state["df_filtered"]) > 0:
+                raw = st.session_state["diagnostic_text"]
+                prepared = _maybe_fallback_for_pdf(raw)
+                st.write({"raw": raw[:120], "pdf_input": prepared[:120], "fallback_mode": use_fallback})
             else:
                 st.write("まず検索してヒットを出してください。")
 
@@ -230,8 +244,6 @@ df_filtered = df[df.apply(
     axis=1
 )]
 df_filtered = df_filtered.reset_index(drop=True)
-
-# 診断用テキスト保存
 st.session_state["df_filtered"] = df_filtered
 st.session_state["diagnostic_text"] = row_text(df_filtered.iloc[0]) if len(df_filtered) > 0 else ""
 
@@ -256,8 +268,8 @@ def convert_google_drive_link(url):
     return url
 
 def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
-    # ★PDF描画では歯科記号を確実に出る記号へ置換
-    s = _normalize_symbols_for_pdf("" if text is None else str(text))
+    # ★厳密モード：置換しない。Fallbackモードのみ代替記号に（表示上の保険）
+    s = _maybe_fallback_for_pdf("" if text is None else str(text))
     if s == "":
         return [""]
     lines, buf = [], ""
