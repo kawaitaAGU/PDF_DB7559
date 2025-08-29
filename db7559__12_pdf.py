@@ -15,91 +15,23 @@ from pathlib import Path
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 import re
 
-# =========================
-# フォント設定
-#  - ベース: 日本語を含む本文用（IPAex or HeiseiKakuGo-W5）
-#  - フォールバック: 歯式記号などの特殊記号用（Unifont / NotoSansSymbols2 / DejaVuSans）
-# =========================
-SYM_FALLBACK_NAME = "SymFallback"  # グローバルで参照
-
+# ---- フォント設定（IPAex を優先、無ければCIDフォントへフォールバック）----
 def _setup_font():
-    """本文用フォント + 記号フォールバックを登録して、本文フォント名を返す"""
     here = Path(__file__).parent
-    fonts_dir = here / "fonts"
-
-    # --- 本文用（日本語含む）
-    base_candidates = [
-        fonts_dir / "IPAexGothic.ttf",
+    candidates = [
+        here / "fonts" / "IPAexGothic.ttf",
         here / "IPAexGothic.ttf",
         Path.cwd() / "fonts" / "IPAexGothic.ttf",
         Path.cwd() / "IPAexGothic.ttf",
     ]
-    base_font = None
-    for p in base_candidates:
+    for p in candidates:
         if p.exists():
-            pdfmetrics.registerFont(TTFont("BaseJP", str(p)))
-            base_font = "BaseJP"
-            break
-    if base_font is None:
-        # 最低限、日本語が出るCIDフォントへ
-        pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
-        base_font = "HeiseiKakuGo-W5"
-
-    # --- 記号フォールバック（歯式コーナー/アーチ記号 など）
-    # 置いた実ファイル名をそのまま書いてOK。Unifont があると確実に出る
-    sym_candidates = [
-        fonts_dir / "Unifont.otf",                          # ← あなたが置いたファイル
-        fonts_dir / "NotoSansSymbols2-Regular.ttf",
-        fonts_dir / "DejaVuSans.ttf",
-        here / "NotoSansSymbols2-Regular.ttf",
-        here / "DejaVuSans.ttf",
-        Path("/System/Library/Fonts/Supplemental/DejaVuSans.ttf"),  # macOS
-        Path("C:/Windows/Fonts/DejaVuSans.ttf"),                    # Windows（置いた場合）
-    ]
-    for p in sym_candidates:
-        if p.exists():
-            pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-            break
-    # 見つからなくても処理継続（この場合は記号が化ける可能性あり）
-
-    return base_font
+            pdfmetrics.registerFont(TTFont("Japanese", str(p)))
+            return "Japanese"
+    pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
+    return "HeiseiKakuGo-W5"
 
 JAPANESE_FONT = _setup_font()
-
-# 歯式で使いそうな記号セット（必要に応じて追加）
-# ★ 追加点：⏊（U+23CA）, ⏉（U+23C9）を含める
-PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⏊⏉⎿⏀′″ʼʹ﹅﹆")  # コーナー/アーチ/プライム/傍点など
-
-def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
-    """
-    ReportLab は自動フォントフォールバックが無いので、
-    文字単位でベース/記号フォントを切替えて描画する。
-    """
-    pen_x = x
-    buf = ""
-    cur_font = base_font
-
-    def flush(seg, font_name):
-        nonlocal pen_x
-        if not seg:
-            return
-        c.setFont(font_name, size)
-        c.drawString(pen_x, y, seg)
-        pen_x += stringWidth(seg, font_name, size)
-
-    for ch in (text or ""):
-        # 記号用フォントが登録されている場合のみ切替
-        target = (sym_font if (ch in PALMER_SYMBOLS and sym_font in pdfmetrics.getRegisteredFontNames())
-                  else base_font)
-        if target != cur_font:
-            flush(buf, cur_font)
-            buf = ch
-            cur_font = target
-        else:
-            buf += ch
-    flush(buf, cur_font)
-    # ベースに戻す
-    c.setFont(base_font, size)
 
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
@@ -292,8 +224,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            # フォールバック付き描画（⏊/⏉/⌝… を記号フォントで）
-            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)
+            c.drawString(left_margin, y, ln)
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
@@ -382,7 +313,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         else:
             y -= 20
 
-        # === 進捗＆ETAの更新（そのまま）===
+        # === 進捗＆ETAの更新（追加） ===
         if st.session_state.get("progress_on"):
             st.session_state["progress"].progress(min(idx / max(total, 1), 1.0))
             elapsed = time.time() - start_time
@@ -404,7 +335,7 @@ if "pdf_bytes" not in st.session_state:
 if st.button("🖨️ PDFを作成（画像付き）"):
     st.session_state["progress_on"] = True
     st.session_state["progress"] = st.progress(0.0)
-    # ETA表示用プレースホルダ
+    # 追加：ETA表示用プレースホルダ
     st.session_state["eta_placeholder"] = st.empty()
 
     start = time.time()
@@ -412,7 +343,7 @@ if st.button("🖨️ PDFを作成（画像付き）"):
         st.session_state["pdf_bytes"] = create_pdf(df_filtered, start_time=start)
     st.session_state["progress_on"] = False
 
-    # 完了時の合計時間を表示
+    # 追加：完了時の合計時間を表示
     total_sec = time.time() - start
     st.session_state["eta_placeholder"].markdown(
         f"✅ 完了：合計 **{int(total_sec//60):02d}:{int(total_sec%60):02d}**"
@@ -454,3 +385,7 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
             st.markdown(f"[画像リンクはこちら]({convert_google_drive_link(link)})")
         else:
             st.write("（画像リンクはありません）")
+
+# デバッグ補助（必要時だけ展開）
+#with st.expander("🔧 現在の列名（正規化後）"):
+#    st.write(list(df.columns))
