@@ -15,6 +15,7 @@ from pathlib import Path
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 import re
 import hashlib
+import unicodedata as _ud
 
 # =========================
 # フォント設定
@@ -84,8 +85,33 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
-# 歯式で使いそうな記号（必要に応じて追加）
+# 個別に拾っておきたい記号（Palmer コーナーなど）
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
+
+def _needs_symbol_font(ch: str) -> bool:
+    """DejaVu/NotoSymbols系で描いた方が安全な文字か判定"""
+    cp = ord(ch)
+    if ch in PALMER_SYMBOLS:
+        return True
+    # よく使う記号ブロック
+    ranges = [
+        (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘ …
+        (0x2580, 0x259F),  # Block Elements
+        (0x25A0, 0x25FF),  # Geometric Shapes ■ ▲ ● …
+        (0x2190, 0x21FF),  # Arrows ← → ↔ ↕ …
+        (0x2300, 0x23FF),  # Misc Technical ⌜ ⌝ ⌞ ⌟ …
+        (0x2070, 0x209F),  # Superscripts/Subscripts
+        (0x02B0, 0x02FF),  # Modifier Letters
+        (0x0300, 0x036F),  # Combining Diacritical Marks
+    ]
+    for a, b in ranges:
+        if a <= cp <= b:
+            return True
+    # 記号カテゴリー（Sm/So/Sk）の一部もフォールバック
+    cat = _ud.category(ch)
+    if cat in {"Sm", "So", "Sk"}:
+        return True
+    return False
 
 def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
     """
@@ -106,7 +132,7 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
         pen_x += stringWidth(seg, font_name, size)
 
     for ch in (text or ""):
-        use_sym = (ch in PALMER_SYMBOLS) and (sym_font in registered)
+        use_sym = _needs_symbol_font(ch) and (sym_font in registered)
         target = sym_font if use_sym else base_font
         if target != cur_font:
             flush(buf, cur_font)
