@@ -14,86 +14,54 @@ import time
 from pathlib import Path
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 import re
-import hashlib
 import unicodedata as _ud
 
 # =========================
-# フォント設定
-#  - ベース: 日本語本文用（IPAex or HeiseiKakuGo-W5）
-#  - フォールバック: 歯式記号など（DejaVuSans / NotoSansSymbols2）
-#  - クラウドでも動くよう、なければダウンロード
+# フォント設定（同梱前提）
+#  - Base: IPAexGothic.ttf（なければ HeiseiKakuGo-W5）
+#  - Symbols: DejaVuSans.ttf（歯式・枠線・技術記号など）
 # =========================
 SYM_FALLBACK_NAME = "SymFallback"  # 記号用フォント名
 
-def _download_if_missing(url: str, dest: Path, sha256: str | None = None):
-    """フォントが無ければダウンロード保存。任意でSHA256検証。"""
-    if dest.exists():
-        return dest
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    data = r.content
-    if sha256:
-        h = hashlib.sha256(data).hexdigest()
-        if h != sha256:
-            raise RuntimeError(f"SHA256 mismatch for {url}")
-    dest.write_bytes(data)
-    return dest
-
 def _setup_font():
-    """本文用フォント＋記号フォールバックを登録し、本文フォント名を返す"""
+    """同梱フォントを登録して本文フォント名を返す（ダウンロードは行わない）"""
     here = Path(__file__).parent
     fonts_dir = here / "fonts"
     fonts_dir.mkdir(exist_ok=True)
 
-    # ---- 本文（日本語OK）: IPAex があればTTF、無ければCID
+    # 本文用（日本語）
     base_font_name = None
-    for p in [fonts_dir / "IPAexGothic.ttf", here / "IPAexGothic.ttf"]:
-        if p.exists():
-            pdfmetrics.registerFont(TTFont("BaseJP", str(p)))
-            base_font_name = "BaseJP"
-            break
-    if base_font_name is None:
+    ipa = fonts_dir / "IPAexGothic.ttf"
+    if ipa.exists():
+        pdfmetrics.registerFont(TTFont("BaseJP", str(ipa)))
+        base_font_name = "BaseJP"
+    else:
+        # 最低限のフォールバック（Glyph足りない場合あり）
         pdfmetrics.registerFont(UnicodeCIDFont("HeiseiKakuGo-W5"))
         base_font_name = "HeiseiKakuGo-W5"
+        st.warning("⚠️ fonts/IPAexGothic.ttf が見つからないため HeiseiKakuGo-W5 にフォールバックします。")
 
-    # ---- 歯式記号用フォールバック: DejaVuSans or NotoSansSymbols2
-    sym_ok = False
-    for p in [fonts_dir / "DejaVuSans.ttf", fonts_dir / "NotoSansSymbols2-Regular.ttf"]:
-        if p.exists():
-            pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-            sym_ok = True
-            break
-    if not sym_ok:
-        # DejaVu Sans を優先取得（公式リポの固定版）
-        try:
-            dejavu_url = "https://github.com/dejavu-fonts/dejavu-fonts/raw/version_2_37/ttf/DejaVuSans.ttf"
-            p = _download_if_missing(dejavu_url, fonts_dir / "DejaVuSans.ttf")
-            pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-            sym_ok = True
-        except Exception:
-            # 予備: Noto Sans Symbols2
-            try:
-                noto_url = "https://github.com/notofonts/noto-fonts/raw/main/hinted/ttf/NotoSansSymbols2/NotoSansSymbols2-Regular.ttf"
-                p = _download_if_missing(noto_url, fonts_dir / "NotoSansSymbols2-Regular.ttf")
-                pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(p)))
-                sym_ok = True
-            except Exception:
-                pass  # なくても処理継続（その場合は記号が豆腐の可能性）
+    # 記号用（歯式・枠線・技術記号）
+    sym = fonts_dir / "DejaVuSans.ttf"
+    if sym.exists():
+        pdfmetrics.registerFont(TTFont(SYM_FALLBACK_NAME, str(sym)))
+    else:
+        st.error("❌ 歯式記号用の fonts/DejaVuSans.ttf が見つかりません。リポの fonts/ に配置してください。")
 
     return base_font_name
 
 JAPANESE_FONT = _setup_font()
 
+# ========= 記号判定（ここが肝）=========
 # 個別に拾っておきたい記号（Palmer コーナーなど）
 PALMER_SYMBOLS = set("⌜⌝⌞⌟⏌⏋⎿⏀′″ʼʹ﹅﹆")
 
 def _needs_symbol_font(ch: str) -> bool:
-    """DejaVu/NotoSymbols系で描いた方が安全な文字か判定"""
+    """DejaVuSansで描いた方が安全な文字かどうかを判定"""
     cp = ord(ch)
     if ch in PALMER_SYMBOLS:
         return True
-    # よく使う記号ブロック
+    # よく使う記号ブロック（歯式で出がち）
     ranges = [
         (0x2500, 0x257F),  # Box Drawing ─ ┌ ┐ └ ┘ …
         (0x2580, 0x259F),  # Block Elements
@@ -107,17 +75,14 @@ def _needs_symbol_font(ch: str) -> bool:
     for a, b in ranges:
         if a <= cp <= b:
             return True
-    # 記号カテゴリー（Sm/So/Sk）の一部もフォールバック
+    # 記号カテゴリー（Sm/So/Sk）も基本フォールバック
     cat = _ud.category(ch)
     if cat in {"Sm", "So", "Sk"}:
         return True
     return False
 
 def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAME):
-    """
-    ReportLabは自動フォールバックが無いので、
-    文字単位でベース/記号フォントを切替えて描画する。
-    """
+    """1行分を、必要に応じて記号フォントへ切替えて描画"""
     pen_x = x
     buf = ""
     cur_font = base_font
@@ -149,15 +114,18 @@ def draw_with_fallback(c, x, y, text, base_font, size, sym_font=SYM_FALLBACK_NAM
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 学生指導用データベース")
 
-# ===== 列名正規化 & 安全取得ユーティリティ =====
+# （任意）フォント登録確認ボタン
+with st.expander("🧪 フォント登録確認", expanded=False):
+    if st.button("登録済みフォントを表示"):
+        st.write(sorted(pdfmetrics.getRegisteredFontNames()))
+
+# ===== 列名正規化 & 安全取得 =====
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """BOM/空白/改行を除去し、よくある別名を正式名へ寄せる"""
     def _clean(s):
         s = str(s).replace("\ufeff", "")
         return re.sub(r"[\u3000 \t\r\n]+", "", s)
     df = df.copy()
     df.columns = [_clean(c) for c in df.columns]
-
     alias = {
         "問題文":  ["設問", "問題", "本文"],
         "選択肢1": ["選択肢Ａ","選択肢a","A","ａ"],
@@ -171,8 +139,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     }
     colset = set(df.columns)
     for canon, cands in alias.items():
-        if canon in colset:
-            continue
+        if canon in colset: continue
         for c in cands:
             if c in colset:
                 df.rename(columns={c: canon}, inplace=True)
@@ -181,28 +148,24 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def safe_get(row: pd.Series | dict, keys, default=""):
-    """Series/辞書から安全に値を取得（NaN, 空白, 別名を考慮）"""
     if isinstance(row, pd.Series):
         row = row.to_dict()
     for k in keys:
         if k in row:
             v = row.get(k)
             try:
-                if pd.isna(v):
-                    continue
+                if pd.isna(v): continue
             except Exception:
                 pass
             s = str(v).strip() if v is not None else ""
-            if s:
-                return s
+            if s: return s
     return default
 
 def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
     need = ["問題文","選択肢1","選択肢2","選択肢3","選択肢4","選択肢5","正解","科目分類","リンクURL"]
     out = df.copy()
     for c in need:
-        if c not in out.columns:
-            out[c] = ""
+        if c not in out.columns: out[c] = ""
     return out
 
 # ===== データ読み込み =====
@@ -213,7 +176,6 @@ df = normalize_columns(df)
 # ===== 検索 =====
 query = st.text_input("問題文・選択肢・分類で検索:")
 st.caption("💡 検索語を `&` でつなげるとAND検索（例: レジン & 硬さ）")
-
 if not query:
     st.stop()
 
@@ -239,17 +201,12 @@ st.info(f"{len(df_filtered)}件ヒットしました")
 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 file_prefix = f"{(query if query else '検索なし')}{timestamp}"
 
-# ===== CSV ダウンロード =====
+# ===== CSV =====
 csv_buffer = io.StringIO()
 ensure_output_columns(df_filtered).to_csv(csv_buffer, index=False)
-st.download_button(
-    label="📥 ヒット結果をCSVダウンロード",
-    data=csv_buffer.getvalue(),
-    file_name=f"{file_prefix}.csv",
-    mime="text/csv"
-)
+st.download_button("📥 ヒット結果をCSVダウンロード", csv_buffer.getvalue(), f"{file_prefix}.csv", "text/csv")
 
-# ===== TXT 整形 =====
+# ===== TXT =====
 def convert_google_drive_link(url):
     if "drive.google.com" in url and "/file/d/" in url:
         try:
@@ -261,17 +218,14 @@ def convert_google_drive_link(url):
 
 def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
     s = "" if text is None else str(text)
-    if s == "":
-        return [""]
+    if s == "": return [""]
     lines, buf = [], ""
     for ch in s:
         if stringWidth(buf + ch, font_name, font_size) <= max_width:
             buf += ch
         else:
-            lines.append(buf)
-            buf = ch
-    if buf:
-        lines.append(buf)
+            lines.append(buf); buf = ch
+    if buf: lines.append(buf)
     return lines
 
 def wrapped_lines(prefix: str, value: str, usable_width: float, font: str, size: int):
@@ -281,9 +235,8 @@ def format_record_to_text(row: pd.Series) -> str:
     q = safe_get(row, ["問題文","設問","問題","本文"])
     parts = [f"問題文: {q}"]
     for i in range(1, 6):
-        choice = safe_get(row, [f"選択肢{i}"])
-        if choice:
-            parts.append(f"選択肢{i}: {choice}")
+        c = safe_get(row, [f"選択肢{i}"])
+        if c: parts.append(f"選択肢{i}: {c}")
     parts.append(f"正解: {safe_get(row, ['正解','解答','答え'])}")
     parts.append(f"分類: {safe_get(row, ['科目分類','分類','科目'])}")
     link = safe_get(row, ["リンクURL","画像URL","画像リンク","リンク","画像Link"])
@@ -291,19 +244,13 @@ def format_record_to_text(row: pd.Series) -> str:
         parts.append(f"画像リンク: {convert_google_drive_link(link)}（PDFに画像表示）")
     return "\n".join(parts)
 
-# ===== TXT ダウンロード =====
 txt_buffer = io.StringIO()
 for _, row in df_filtered.iterrows():
     txt_buffer.write(format_record_to_text(row))
     txt_buffer.write("\n\n" + "-"*40 + "\n\n")
-st.download_button(
-    label="📄 ヒット結果をTEXTダウンロード",
-    data=txt_buffer.getvalue(),
-    file_name=f"{file_prefix}.txt",
-    mime="text/plain"
-)
+st.download_button("📄 ヒット結果をTEXTダウンロード", txt_buffer.getvalue(), f"{file_prefix}.txt", "text/plain")
 
-# ===== PDF 作成（ページ先頭は必ず問題文から／画像は必ず表示）=====
+# ===== PDF =====
 def create_pdf(records, progress=None, status=None, start_time=None):
     pdf_buffer = io.BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=A4)
@@ -318,8 +265,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     y = height - top_margin
 
     total = len(records)
-    if start_time is None:
-        start_time = time.time()
+    if start_time is None: start_time = time.time()
 
     def fmt(sec):
         m = int(sec // 60); s = int(sec % 60)
@@ -334,8 +280,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            # フォールバック付き描画
-            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)
+            draw_with_fallback(c, left_margin, y, ln, JAPANESE_FONT, 12)  # ← フォールバック描画
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
@@ -345,15 +290,13 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         choices = []
         for i in range(1, 6):
             v = safe_get(row, [f"選択肢{i}"])
-            if v:
-                choices.append((i, v))
+            if v: choices.append((i, v))
 
         ans = safe_get(row, ["正解","解答","答え"])
         cat = safe_get(row, ["科目分類","分類","科目"])
 
         # 画像の事前取得
-        pil = None
-        img_est_h = 0
+        pil = None; img_est_h = 0
         link_raw = safe_get(row, ["リンクURL","画像URL","画像リンク","リンク"])
         if link_raw:
             try:
@@ -366,8 +309,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
                 img_est_h = nh + 20
             except Exception:
                 pil = None
-                img_est_h = wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12)
-                img_est_h = len(img_est_h) * line_h
+                img_est_h = len(wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12)) * line_h
 
         # 高さ見積り
         est_h = 0
@@ -376,38 +318,33 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         choice_lines_list = []
         for i, v in choices:
             ls = wrapped_lines(f"選択肢{i}: ", v, usable_width, JAPANESE_FONT, 12)
-            choice_lines_list.append(ls)
-            est_h += len(ls) * line_h
+            choice_lines_list.append(ls); est_h += len(ls) * line_h
         est_h += img_est_h if img_est_h else 0
         ans_lines = wrapped_lines("正解: ", ans, usable_width, JAPANESE_FONT, 12)
         cat_lines = wrapped_lines("分類: ", cat, usable_width, JAPANESE_FONT, 12)
-        est_h += len(ans_lines) * line_h + len(cat_lines) * line_h + 20
+        est_h += (len(ans_lines) + len(cat_lines)) * line_h + 20
 
-        # ページ先頭を必ず問題文から
-        if y - est_h < bottom_margin:
-            new_page()
+        # ページ先頭は必ず問題文から
+        if y - est_h < bottom_margin: new_page()
 
         # 描画
         draw_wrapped_lines(q_lines)
-        for ls in choice_lines_list:
-            draw_wrapped_lines(ls)
+        for ls in choice_lines_list: draw_wrapped_lines(ls)
 
         if pil is not None:
             try:
                 iw, ih = pil.size
                 scale = min(usable_width / iw, page_usable_h / ih, 1.0)
                 nw, nh = iw * scale, ih * scale
-                if y - nh < bottom_margin:
-                    new_page()
+                if y - nh < bottom_margin: new_page()
                 remaining = y - bottom_margin
                 if nh > remaining:
                     adj = remaining / nh
                     nw, nh = nw * adj, nh * adj
-                img_io = io.BytesIO()
-                pil.save(img_io, format="PNG")
-                img_io.seek(0)
+                img_io = io.BytesIO(); pil.save(img_io, format="PNG"); img_io.seek(0)
                 img_reader = ImageReader(img_io)
-                c.drawImage(img_reader, left_margin, y - nh, width=nw, height=nh, preserveAspectRatio=True, mask='auto')
+                c.drawImage(img_reader, left_margin, y - nh, width=nw, height=nh,
+                            preserveAspectRatio=True, mask='auto')
                 y -= nh + 20
             except Exception as e:
                 err_lines = wrapped_lines("", f"[画像読み込み失敗: {e}]", usable_width, JAPANESE_FONT, 12)
@@ -419,12 +356,10 @@ def create_pdf(records, progress=None, status=None, start_time=None):
         draw_wrapped_lines(ans_lines)
         draw_wrapped_lines(cat_lines)
 
-        if y - 20 < bottom_margin:
-            new_page()
-        else:
-            y -= 20
+        if y - 20 < bottom_margin: new_page()
+        else: y -= 20
 
-        # === 進捗＆ETA ===
+        # 進捗＆ETA
         if st.session_state.get("progress_on"):
             st.session_state["progress"].progress(min(idx / max(total, 1), 1.0))
             elapsed = time.time() - start_time
@@ -432,7 +367,8 @@ def create_pdf(records, progress=None, status=None, start_time=None):
             remaining = max(total - idx, 0) * avg_per_item
             if "eta_placeholder" in st.session_state:
                 st.session_state["eta_placeholder"].markdown(
-                    f"⏳ 残り目安: **{fmt(remaining)}**（経過 {fmt(elapsed)} / {idx}/{total} 件）"
+                    f"⏳ 残り目安: **{int(remaining//60):02d}:{int(remaining%60):02d}**"
+                    f"（経過 {int(elapsed//60):02d}:{int(elapsed%60):02d} / {idx}/{total} 件）"
                 )
 
     c.save()
@@ -446,7 +382,6 @@ if "pdf_bytes" not in st.session_state:
 if st.button("🖨️ PDFを作成（画像付き）"):
     st.session_state["progress_on"] = True
     st.session_state["progress"] = st.progress(0.0)
-    # ETA表示用プレースホルダ
     st.session_state["eta_placeholder"] = st.empty()
 
     start = time.time()
@@ -454,7 +389,6 @@ if st.button("🖨️ PDFを作成（画像付き）"):
         st.session_state["pdf_bytes"] = create_pdf(df_filtered, start_time=start)
     st.session_state["progress_on"] = False
 
-    # 完了時の合計時間を表示
     total_sec = time.time() - start
     st.session_state["eta_placeholder"].markdown(
         f"✅ 完了：合計 **{int(total_sec//60):02d}:{int(total_sec%60):02d}**"
@@ -463,13 +397,13 @@ if st.button("🖨️ PDFを作成（画像付き）"):
 
 if st.session_state["pdf_bytes"] is not None:
     st.download_button(
-        label="📄 ヒット結果をPDFダウンロード",
-        data=st.session_state["pdf_bytes"],
-        file_name=f"{file_prefix}.pdf",
-        mime="application/pdf"
+        "📄 ヒット結果をPDFダウンロード",
+        st.session_state["pdf_bytes"],
+        f"{file_prefix}.pdf",
+        "application/pdf"
     )
 
-# ===== 画面の一覧（正解は初期非表示）=====
+# ===== 一覧 =====
 st.markdown("### 🔍 ヒットした問題一覧")
 for i, (_, record) in enumerate(df_filtered.iterrows()):
     title = safe_get(record, ["問題文","設問","問題","本文"])
@@ -480,8 +414,7 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
         st.markdown("### ✏️ 選択肢")
         for j in range(1, 6):
             val = safe_get(record, [f"選択肢{j}"])
-            if val:
-                st.write(f"- {val}")
+            if val: st.write(f"- {val}")
 
         show_ans = st.checkbox("正解を表示する", key=f"show_answer_{i}", value=False)
         if show_ans:
