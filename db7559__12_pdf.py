@@ -99,8 +99,8 @@ df = df.fillna("")
 df = normalize_columns(df)
 
 # ===== 検索 =====
-query = st.text_input("問題文・選択肢・分類で検索:")
-st.caption("💡 検索語を `&` でつなげるとAND検索（例: レジン & 硬さ）")
+query = st.text_input("問題文・選択肢・分類・画像リンク(URL)で検索:")
+st.caption("💡 検索語を `&` でつなげるとAND検索（例: レジン & 硬さ）。URLの一部（例: http, drive.google）でも可。")
 
 if not query:
     st.stop()
@@ -108,11 +108,14 @@ if not query:
 keywords = [kw.strip() for kw in query.split("&") if kw.strip()]
 
 def row_text(r: pd.Series) -> str:
+    # 🔸 ここを変更：リンク系カラムも検索対象に含める
     parts = [
         safe_get(r, ["問題文","設問","問題","本文"]),
         *[safe_get(r, [f"選択肢{i}"]) for i in range(1,6)],
         safe_get(r, ["正解","解答","答え"]),
         safe_get(r, ["科目分類","分類","科目"]),
+        # 追加：URL/画像リンク
+        safe_get(r, ["リンクURL","画像URL","画像リンク","リンク","画像Link"]),
     ]
     return " ".join([p for p in parts if p])
 
@@ -239,7 +242,7 @@ st.download_button(
         add_meta=False,       # Back末尾に 科目分類/リンクURL を追記するなら True
         overall_line_ending="lf",  # GoodNotesならLF推奨（Windows運用なら"crlf"も可）
     ),
-    file_name=f"{file_prefix}_goodnotes.csv",  # ★ ここを変更
+    file_name=f"{file_prefix}_goodnotes.csv",
     mime="text/csv",
 )
 # --------------------------------------------------------------------
