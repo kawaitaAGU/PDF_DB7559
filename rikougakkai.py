@@ -33,7 +33,7 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
-st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
+st.set_page_config(page_title="🔍 国家試験用データベース", layout="wide")
 st.title("🔍 日本歯科理工学会発表用_歯科医師国家試験データベース")
 
 # ===== 列名正規化 & 安全取得ユーティリティ =====
