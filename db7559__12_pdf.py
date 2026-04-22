@@ -94,7 +94,7 @@ def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 # ===== データ読み込み =====
 # BOM 対策のため utf-8-sig、文字列で統一して取り込み
-df = pd.read_csv("97_118DB.csv", dtype=str, encoding="utf-8-sig")
+df = pd.read_csv("97_119DB.csv", dtype=str, encoding="utf-8-sig")
 df = df.fillna("")
 df = normalize_columns(df)
 
