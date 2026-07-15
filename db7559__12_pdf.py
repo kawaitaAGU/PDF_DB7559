@@ -33,6 +33,67 @@ def _setup_font():
 
 JAPANESE_FONT = _setup_font()
 
+# ---- 追加フォント（アラビア文字など日本語フォントに無い文字用のフォールバック）----
+def _setup_fallback_font():
+    here = Path(__file__).parent
+    candidates = [
+        here / "fonts" / "Unifont.otf",
+        here / "fonts" / "DejaVuSans.ttf",
+        Path.cwd() / "fonts" / "Unifont.otf",
+        Path.cwd() / "fonts" / "DejaVuSans.ttf",
+    ]
+    for i, p in enumerate(candidates):
+        if p.exists():
+            try:
+                name = f"Fallback{i}"
+                pdfmetrics.registerFont(TTFont(name, str(p)))
+                return name
+            except Exception:
+                continue
+    return None
+
+FALLBACK_FONT = _setup_fallback_font()
+
+# ---- アラビア文字の連結表示・右→左の表示順を補正 ----
+try:
+    import arabic_reshaper
+    from bidi.algorithm import get_display as _bidi_display
+except ImportError:
+    arabic_reshaper = None
+    _bidi_display = None
+
+_ARABIC_RE = re.compile(r'[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]')
+
+def _shape_arabic(text: str) -> str:
+    """アラビア文字が含まれる場合のみ、文字の連結（reshape）と表示順（bidi）を整える"""
+    if not text or arabic_reshaper is None or not _ARABIC_RE.search(text):
+        return text
+    try:
+        return _bidi_display(arabic_reshaper.reshape(text))
+    except Exception:
+        return text
+
+def _split_font_runs(text: str):
+    """文字列をアラビア文字とそれ以外のランに分割し、それぞれの描画フォントを決める"""
+    if not text or FALLBACK_FONT is None:
+        return [(JAPANESE_FONT, text or "")]
+    runs = []
+    buf, cur_is_arabic = "", None
+    for ch in text:
+        is_arabic = bool(_ARABIC_RE.match(ch))
+        if cur_is_arabic is None:
+            cur_is_arabic = is_arabic
+        if is_arabic != cur_is_arabic:
+            runs.append((FALLBACK_FONT if cur_is_arabic else JAPANESE_FONT, buf))
+            buf, cur_is_arabic = "", is_arabic
+        buf += ch
+    if buf:
+        runs.append((FALLBACK_FONT if cur_is_arabic else JAPANESE_FONT, buf))
+    return runs
+
+def _text_width(text: str, font_size: int) -> float:
+    return sum(stringWidth(chunk, font, font_size) for font, chunk in _split_font_runs(text) if chunk)
+
 st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
 st.title("🔍 歯科医師国家試験97_119回データベース")
 
@@ -47,7 +108,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     alias = {
         "問題文":  ["設問", "問題", "本文"],
-        "選択肢1": ["選択肢Ａ","選択肢a","A","ａ"],
+        "選択肢1": ["選択è¢Ａ","選択肢a","A","ａ"],
         "選択肢2": ["選択肢Ｂ","選択肢b","B","ｂ"],
         "選択肢3": ["選択肢Ｃ","選択肢c","C","ｃ"],
         "選択肢4": ["選択肢Ｄ","選択肢d","D","ｄ"],
@@ -263,7 +324,7 @@ def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
         return [""]
     lines, buf = [], ""
     for ch in s:
-        if stringWidth(buf + ch, font_name, font_size) <= max_width:
+        if _text_width(buf + ch, font_size) <= max_width:
             buf += ch
         else:
             lines.append(buf)
@@ -273,7 +334,7 @@ def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
     return lines
 
 def wrapped_lines(prefix: str, value: str, usable_width: float, font: str, size: int):
-    return wrap_text(f"{prefix}{value}", usable_width, font, size)
+    return wrap_text(f"{prefix}{_shape_arabic(value)}", usable_width, font, size)
 
 def format_record_to_text(row: pd.Series) -> str:
     q = safe_get(row, ["問題文","設問","問題","本文"])
@@ -330,7 +391,14 @@ def create_pdf(records, progress=None, status=None, start_time=None):
     def draw_wrapped_lines(lines):
         nonlocal y
         for ln in lines:
-            c.drawString(left_margin, y, ln)
+            x = left_margin
+            for font, chunk in _split_font_runs(ln):
+                if not chunk:
+                    continue
+                c.setFont(font, 12)
+                c.drawString(x, y, chunk)
+                x += stringWidth(chunk, font, 12)
+            c.setFont(JAPANESE_FONT, 12)
             y -= line_h
 
     for idx, (_, row) in enumerate(records.iterrows(), start=1):
@@ -478,3 +546,4 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
 # デバッグ補助（必要時だけ展開）
 #with st.expander("🔧 現在の列名（正規化後）"):
 #   st.write(list(df.columns))
+
