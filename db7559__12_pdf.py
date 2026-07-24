@@ -94,7 +94,278 @@ def _split_font_runs(text: str):
 def _text_width(text: str, font_size: int) -> float:
     return sum(stringWidth(chunk, font, font_size) for font, chunk in _split_font_runs(text) if chunk)
 
-st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
+st.set_page_config(
+    page_title="Dental Exam Archive",
+    page_icon="🦷",
+    layout="wide",
+)
+
+# ===== ウェルカム画面 =====
+# 認証画面ではなく、検索データベースへ入る前の入口ページ。
+# 旧版の検索・CSV・TEXT・GoodNotes・画像付きPDF機能には手を加えない。
+if "welcome_entered" not in st.session_state:
+    st.session_state["welcome_entered"] = False
+
+if not st.session_state["welcome_entered"]:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background:
+                radial-gradient(circle at 76% 22%, rgba(120, 79, 255, .18), transparent 24rem),
+                radial-gradient(circle at 24% 72%, rgba(42, 214, 172, .10), transparent 22rem),
+                #05091a;
+        }
+
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        footer {
+            display: none;
+        }
+
+        .block-container {
+            max-width: 1100px;
+            padding-top: 5vh;
+            padding-bottom: 4vh;
+        }
+
+        .welcome-shell {
+            min-height: 68vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #ffffff;
+            text-align: center;
+        }
+
+        .welcome-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .5rem .85rem;
+            border: 1px solid rgba(168, 192, 255, .22);
+            border-radius: 999px;
+            background: rgba(18, 27, 60, .72);
+            color: #b9c7f5;
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .14em;
+        }
+
+        .welcome-scene {
+            position: relative;
+            width: min(760px, 94vw);
+            margin: 2rem auto 1.7rem;
+            padding: 2.6rem 1rem 1.15rem;
+            border-bottom: 2px solid rgba(112, 132, 200, .22);
+        }
+
+        .welcome-door {
+            position: absolute;
+            right: 10%;
+            bottom: 1.1rem;
+            width: 135px;
+            height: 185px;
+            border: 2px solid rgba(164, 111, 255, .62);
+            border-radius: 72px 72px 8px 8px;
+            background:
+                radial-gradient(circle at 50% 34%, #b645ef 0 4px, transparent 5px),
+                linear-gradient(155deg, rgba(113, 39, 192, .86), rgba(17, 9, 57, .95));
+            box-shadow:
+                inset 0 0 34px rgba(211, 73, 255, .35),
+                0 0 45px rgba(139, 58, 255, .25);
+        }
+
+        .welcome-door::after {
+            content: "✦";
+            position: absolute;
+            inset: 42px 0 auto;
+            color: #d599ff;
+            font-size: 2.7rem;
+            text-shadow: 0 0 20px #a545ff;
+        }
+
+        .character-line {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: center;
+            align-items: end;
+            gap: clamp(.35rem, 1.8vw, 1rem);
+            padding-right: 12%;
+            filter: drop-shadow(0 15px 10px rgba(0, 0, 0, .34));
+        }
+
+        .character {
+            width: clamp(54px, 8vw, 78px);
+            height: clamp(54px, 8vw, 78px);
+            display: grid;
+            place-items: center;
+            border-radius: 24px 24px 28px 28px;
+            border: 2px solid rgba(255, 255, 255, .12);
+            background: linear-gradient(160deg, #24366a, #111936);
+            font-size: clamp(2rem, 5vw, 3.3rem);
+            box-shadow: inset 0 -12px 24px rgba(0, 0, 0, .24);
+        }
+
+        .character:nth-child(2) {
+            transform: translateY(7px);
+            background: linear-gradient(160deg, #ff8b3d, #bd401f);
+        }
+
+        .character:nth-child(3) {
+            transform: translateY(-5px);
+            background: linear-gradient(160deg, #75d777, #277e52);
+        }
+
+        .character:nth-child(4) {
+            transform: translateY(4px);
+            background: linear-gradient(160deg, #8f6af2, #44309b);
+        }
+
+        .character:nth-child(5) {
+            transform: translateY(-3px);
+            background: linear-gradient(160deg, #64c6e8, #227596);
+        }
+
+        .welcome-title {
+            margin: .2rem 0 .65rem;
+            font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+            font-size: clamp(2.3rem, 5vw, 4.4rem);
+            font-weight: 700;
+            line-height: 1.18;
+            letter-spacing: -.035em;
+            text-shadow: 0 8px 32px rgba(0, 0, 0, .34);
+        }
+
+        .welcome-copy {
+            max-width: 660px;
+            margin: 0 auto;
+            color: #b8c1dc;
+            font-size: clamp(.92rem, 1.6vw, 1.08rem);
+            line-height: 1.9;
+        }
+
+        .welcome-meta {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: .7rem;
+            margin-top: 1.45rem;
+        }
+
+        .welcome-meta span {
+            padding: .42rem .72rem;
+            border-radius: 8px;
+            background: rgba(125, 151, 224, .10);
+            color: #91a6df;
+            font-size: .76rem;
+        }
+
+        div.stButton {
+            max-width: 470px;
+            margin: .2rem auto 0;
+        }
+
+        div.stButton > button {
+            width: 100%;
+            min-height: 3.75rem;
+            border: 0;
+            border-radius: 999px;
+            background: #ffffff;
+            color: #11162c;
+            font-size: 1.05rem;
+            font-weight: 800;
+            box-shadow: 0 16px 45px rgba(0, 0, 0, .3);
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        div.stButton > button:hover {
+            color: #11162c;
+            border: 0;
+            transform: translateY(-2px);
+            box-shadow: 0 20px 52px rgba(0, 0, 0, .38);
+        }
+
+        div.stButton > button:focus {
+            color: #11162c;
+            border: 0;
+            box-shadow: 0 0 0 4px rgba(122, 93, 255, .4);
+        }
+
+        .welcome-note {
+            margin: 1.15rem 0 0;
+            color: #697799;
+            font-size: .75rem;
+            text-align: center;
+        }
+
+        @media (max-width: 640px) {
+            .block-container {
+                padding-top: 2vh;
+            }
+
+            .welcome-scene {
+                margin-top: 1.2rem;
+                padding-top: 2rem;
+            }
+
+            .welcome-door {
+                right: 3%;
+                width: 92px;
+                height: 135px;
+            }
+
+            .character-line {
+                justify-content: flex-start;
+                gap: .35rem;
+                padding-right: 11%;
+            }
+
+            .welcome-copy br {
+                display: none;
+            }
+        }
+        </style>
+
+        <section class="welcome-shell">
+            <div class="welcome-kicker">✦ DENTAL EXAM ARCHIVE</div>
+            <div class="welcome-scene" aria-label="学びの入口に並ぶ歯科の仲間たち">
+                <div class="welcome-door"></div>
+                <div class="character-line">
+                    <div class="character">🦆</div>
+                    <div class="character">🔥</div>
+                    <div class="character">🌱</div>
+                    <div class="character">🦊</div>
+                    <div class="character">🦷</div>
+                </div>
+            </div>
+            <h1 class="welcome-title">学びの扉は、もうすぐそこ。</h1>
+            <p class="welcome-copy">
+                歯科医師国家試験 第97回〜119回を横断検索。<br>
+                学生指導と日々の復習を、もっと軽やかに。
+            </p>
+            <div class="welcome-meta">
+                <span>8,000問以上を収録</span>
+                <span>AND検索対応</span>
+                <span>画像付きPDF出力</span>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("データベースを開く  →", type="primary"):
+        st.session_state["welcome_entered"] = True
+        st.rerun()
+
+    st.markdown(
+        '<p class="welcome-note">Dental Exam Archive · Student Guidance Database</p>',
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
 st.title("🔍 歯科医師国家試験97_119回データベース")
 
 # ===== 列名正規化 & 安全取得ユーティリティ =====
