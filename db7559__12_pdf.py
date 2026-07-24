@@ -94,7 +94,412 @@ def _split_font_runs(text: str):
 def _text_width(text: str, font_size: int) -> float:
     return sum(stringWidth(chunk, font, font_size) for font, chunk in _split_font_runs(text) if chunk)
 
-st.set_page_config(page_title="🔍 学生指導用データベース", layout="wide")
+st.set_page_config(
+    page_title="Dental Exam Archive",
+    page_icon="🦷",
+    layout="wide",
+)
+
+# ===== ウェルカム画面 =====
+# 認証画面ではなく、検索データベースへ入る前の入口ページ。
+# 旧版の検索・CSV・TEXT・GoodNotes・画像付きPDF機能には手を加えない。
+if "welcome_entered" not in st.session_state:
+    st.session_state["welcome_entered"] = False
+
+if not st.session_state["welcome_entered"]:
+    st.markdown(
+        """
+        <style>
+        [data-testid="stAppViewContainer"] {
+            background:
+                radial-gradient(circle at 50% 42%, rgba(65, 208, 255, .13), transparent 26rem),
+                radial-gradient(circle at 12% 78%, rgba(244, 184, 69, .08), transparent 20rem),
+                linear-gradient(180deg, #07101d 0%, #0b1624 58%, #09101a 100%);
+        }
+
+        [data-testid="stHeader"],
+        [data-testid="stToolbar"],
+        footer {
+            display: none;
+        }
+
+        .block-container {
+            max-width: 1180px;
+            padding-top: 2.5vh;
+            padding-bottom: 3vh;
+        }
+
+        .welcome-shell {
+            min-height: 76vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: #f9f5e9;
+            text-align: center;
+        }
+
+        .welcome-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: .55rem;
+            padding: .5rem .85rem;
+            border: 1px solid rgba(235, 196, 119, .25);
+            border-radius: 999px;
+            background: rgba(24, 38, 55, .82);
+            color: #e6ca91;
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .14em;
+        }
+
+        .library-scene {
+            position: relative;
+            width: min(930px, 96vw);
+            height: clamp(285px, 37vw, 410px);
+            margin: 1.35rem auto 1.1rem;
+            overflow: hidden;
+            border: 1px solid rgba(189, 151, 82, .18);
+            border-radius: 28px;
+            background:
+                linear-gradient(90deg, rgba(4, 10, 17, .64), transparent 24%, transparent 76%, rgba(4, 10, 17, .64)),
+                linear-gradient(180deg, #111e2d 0%, #0c1723 72%, #11151b 72%, #080c12 100%);
+            box-shadow:
+                inset 0 -40px 70px rgba(0, 0, 0, .48),
+                0 34px 80px rgba(0, 0, 0, .38);
+        }
+
+        .library-scene::before,
+        .library-scene::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            bottom: 26%;
+            width: 25%;
+            background:
+                repeating-linear-gradient(180deg, transparent 0 47px, #6d4b2d 48px 53px),
+                repeating-linear-gradient(90deg, #314059 0 13px, #8b5530 14px 22px, #22344d 23px 36px, #a07846 37px 43px);
+            opacity: .8;
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, .65);
+        }
+
+        .library-scene::before {
+            left: 0;
+        }
+
+        .library-scene::after {
+            right: 0;
+        }
+
+        .window-moon {
+            position: absolute;
+            top: 7%;
+            left: 50%;
+            width: 92px;
+            height: 116px;
+            transform: translateX(-50%);
+            border: 5px solid #273c50;
+            border-radius: 48px 48px 4px 4px;
+            background:
+                radial-gradient(circle at 68% 30%, #fff5bc 0 11px, #e9c871 12px 16px, transparent 17px),
+                linear-gradient(180deg, #09152c, #142749);
+            box-shadow:
+                0 0 26px rgba(127, 182, 232, .14),
+                inset 0 0 18px rgba(0, 0, 0, .5);
+        }
+
+        .tooth-gate {
+            position: absolute;
+            z-index: 3;
+            top: 19%;
+            left: 50%;
+            width: clamp(120px, 18vw, 175px);
+            height: clamp(150px, 23vw, 220px);
+            transform: translateX(-50%);
+            display: grid;
+            place-items: center;
+            border: 2px solid rgba(141, 236, 255, .48);
+            border-radius: 80px 80px 35px 35px;
+            background:
+                radial-gradient(circle at 50% 46%, rgba(158, 244, 255, .44), transparent 48%),
+                linear-gradient(160deg, rgba(22, 94, 118, .88), rgba(7, 37, 56, .94));
+            box-shadow:
+                inset 0 0 32px rgba(134, 242, 255, .42),
+                0 0 24px rgba(71, 207, 237, .42),
+                0 0 70px rgba(71, 207, 237, .25);
+        }
+
+        .tooth-gate::before {
+            content: "🦷";
+            font-size: clamp(4.2rem, 9vw, 7rem);
+            filter:
+                drop-shadow(0 0 8px #d9fbff)
+                drop-shadow(0 0 22px #67dcef);
+        }
+
+        .tooth-gate::after {
+            content: "知識の書庫";
+            position: absolute;
+            bottom: 11px;
+            color: #bff5ff;
+            font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+            font-size: .72rem;
+            letter-spacing: .16em;
+        }
+
+        .floor-light {
+            position: absolute;
+            z-index: 2;
+            left: 50%;
+            bottom: 2%;
+            width: 48%;
+            height: 28%;
+            transform: translateX(-50%);
+            background: linear-gradient(180deg, rgba(72, 212, 238, .22), transparent 76%);
+            clip-path: polygon(36% 0, 64% 0, 100% 100%, 0 100%);
+            filter: blur(2px);
+        }
+
+        .library-desk {
+            position: absolute;
+            z-index: 4;
+            left: 6%;
+            right: 6%;
+            bottom: 13%;
+            height: 15px;
+            border-radius: 7px;
+            background: linear-gradient(180deg, #9c6c38, #50331e);
+            box-shadow: 0 10px 0 #2e1d14, 0 20px 22px rgba(0, 0, 0, .45);
+        }
+
+        .library-friends {
+            position: absolute;
+            z-index: 6;
+            left: 8%;
+            right: 8%;
+            bottom: calc(13% + 15px);
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            pointer-events: none;
+        }
+
+        .friend {
+            position: relative;
+            width: clamp(72px, 11vw, 112px);
+            height: clamp(96px, 14vw, 138px);
+            display: grid;
+            place-items: center;
+            border: 2px solid rgba(255, 255, 255, .12);
+            border-radius: 42px 42px 28px 28px;
+            box-shadow:
+                inset 0 -20px 26px rgba(0, 0, 0, .25),
+                0 14px 20px rgba(0, 0, 0, .28);
+        }
+
+        .friend::after {
+            content: "";
+            position: absolute;
+            bottom: 20%;
+            width: 34%;
+            height: 5px;
+            border-radius: 999px;
+            background: rgba(6, 17, 28, .72);
+        }
+
+        .toothbrush-friend {
+            background: linear-gradient(160deg, #63d1d0, #216d80);
+        }
+
+        .book-friend {
+            background: linear-gradient(160deg, #ec9b58, #994926);
+        }
+
+        .mirror-friend {
+            background: linear-gradient(160deg, #a38bd8, #514382);
+        }
+
+        .friend-icon {
+            transform: translateY(-8%);
+            font-size: clamp(2.7rem, 6vw, 4.7rem);
+            filter: drop-shadow(0 7px 5px rgba(0, 0, 0, .28));
+        }
+
+        .mirror-tool {
+            position: relative;
+            width: clamp(46px, 6vw, 64px);
+            height: clamp(64px, 8vw, 88px);
+            transform: rotate(-18deg) translateY(-5%);
+        }
+
+        .mirror-tool::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 68%;
+            aspect-ratio: 1;
+            border: 5px solid #d7eef4;
+            border-radius: 50%;
+            background: radial-gradient(circle at 35% 30%, #f7ffff, #85bdcf 52%, #426f85);
+            box-shadow: 0 0 17px rgba(186, 240, 255, .55);
+        }
+
+        .mirror-tool::after {
+            content: "";
+            position: absolute;
+            top: 42%;
+            left: 31%;
+            width: 8px;
+            height: 59%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #c8dce2, #758e9a);
+        }
+
+        .welcome-title {
+            margin: .2rem 0 .65rem;
+            font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+            font-size: clamp(2.3rem, 5vw, 4.4rem);
+            font-weight: 700;
+            line-height: 1.18;
+            letter-spacing: -.035em;
+            text-shadow: 0 8px 32px rgba(0, 0, 0, .34);
+        }
+
+        .welcome-copy {
+            max-width: 660px;
+            margin: 0 auto;
+            color: #bdc9d4;
+            font-size: clamp(.92rem, 1.6vw, 1.08rem);
+            line-height: 1.9;
+        }
+
+        .welcome-meta {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: .7rem;
+            margin-top: 1.45rem;
+        }
+
+        .welcome-meta span {
+            padding: .42rem .72rem;
+            border-radius: 8px;
+            background: rgba(235, 196, 119, .09);
+            color: #d8bd88;
+            font-size: .76rem;
+        }
+
+        div.stButton {
+            max-width: 470px;
+            margin: .2rem auto 0;
+        }
+
+        div.stButton > button {
+            width: 100%;
+            min-height: 3.75rem;
+            border: 0;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #fff8dc, #efd38d);
+            color: #17202b;
+            font-size: 1.05rem;
+            font-weight: 800;
+            box-shadow:
+                0 16px 45px rgba(0, 0, 0, .3),
+                0 0 30px rgba(239, 211, 141, .12);
+            transition: transform .18s ease, box-shadow .18s ease;
+        }
+
+        div.stButton > button:hover {
+            color: #17202b;
+            border: 0;
+            transform: translateY(-2px);
+            box-shadow: 0 20px 52px rgba(0, 0, 0, .38);
+        }
+
+        div.stButton > button:focus {
+            color: #17202b;
+            border: 0;
+            box-shadow: 0 0 0 4px rgba(239, 211, 141, .35);
+        }
+
+        .welcome-note {
+            margin: 1.15rem 0 0;
+            color: #718292;
+            font-size: .75rem;
+            text-align: center;
+        }
+
+        @media (max-width: 640px) {
+            .block-container {
+                padding-top: 2vh;
+            }
+
+            .library-scene {
+                height: 300px;
+                margin-top: 1rem;
+            }
+
+            .library-scene::before,
+            .library-scene::after {
+                width: 22%;
+            }
+
+            .friend {
+                width: 62px;
+                height: 87px;
+            }
+
+            .welcome-copy br {
+                display: none;
+            }
+        }
+        </style>
+
+        <section class="welcome-shell">
+            <div class="welcome-kicker">✦ THE MIDNIGHT DENTAL LIBRARY</div>
+            <div class="library-scene" aria-label="夜の図書館と歯の形をした光る入口">
+                <div class="window-moon"></div>
+                <div class="floor-light"></div>
+                <div class="tooth-gate"></div>
+                <div class="library-desk"></div>
+                <div class="library-friends" aria-label="歯ブラシ、教科書、歯科ミラーの仲間たち">
+                    <div class="friend toothbrush-friend">
+                        <span class="friend-icon">🪥</span>
+                    </div>
+                    <div class="friend book-friend">
+                        <span class="friend-icon">📖</span>
+                    </div>
+                    <div class="friend mirror-friend">
+                        <span class="mirror-tool"></span>
+                    </div>
+                </div>
+            </div>
+            <h1 class="welcome-title">夜の図書館へ、ようこそ。</h1>
+            <p class="welcome-copy">
+                光る歯の扉の先には、第97回〜119回の知識が眠っています。<br>
+                歯科の仲間たちと一緒に、今日の一問を探しにいきましょう。
+            </p>
+            <div class="welcome-meta">
+                <span>8,000問以上を収録</span>
+                <span>AND検索対応</span>
+                <span>画像付きPDF出力</span>
+            </div>
+        </section>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("学習をはじめる  →", type="primary"):
+        st.session_state["welcome_entered"] = True
+        st.rerun()
+
+    st.markdown(
+        '<p class="welcome-note">Dental Exam Archive · Student Guidance Database</p>',
+        unsafe_allow_html=True,
+    )
+    st.stop()
+
 st.title("🔍 歯科医師国家試験97_119回データベース")
 
 # ===== 列名正規化 & 安全取得ユーティリティ =====
@@ -108,7 +513,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
 
     alias = {
         "問題文":  ["設問", "問題", "本文"],
-        "選択肢1": ["選択Ã¨¢Ａ","選択肢a","A","ａ"],
+        "選択肢1": ["選択è¢Ａ","選択肢a","A","ａ"],
         "選択肢2": ["選択肢Ｂ","選択肢b","B","ｂ"],
         "選択肢3": ["選択肢Ｃ","選択肢c","C","ｃ"],
         "選択肢4": ["選択肢Ｄ","選択肢d","D","ｄ"],
@@ -546,5 +951,4 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
 # デバッグ補助（必要時だけ展開）
 #with st.expander("🔧 現在の列名（正規化後）"):
 #   st.write(list(df.columns))
-
 
