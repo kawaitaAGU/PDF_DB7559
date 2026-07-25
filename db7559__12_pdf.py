@@ -500,7 +500,303 @@ if not st.session_state["welcome_entered"]:
     )
     st.stop()
 
-st.title("🔍 歯科医師国家試験97_119回データベース")
+# ===== データベース画面のデザイン =====
+st.markdown(
+    """
+    <style>
+    :root {
+        --dq-ink: #102820;
+        --dq-green: #086b50;
+        --dq-green-dark: #07513e;
+        --dq-lime: #b6d86b;
+        --dq-paper: #f6f7f1;
+        --dq-card: #fffef8;
+        --dq-line: #dfe4da;
+        --dq-muted: #697770;
+    }
+
+    [data-testid="stAppViewContainer"] {
+        background:
+            linear-gradient(rgba(8, 107, 80, .028) 1px, transparent 1px),
+            var(--dq-paper);
+        background-size: 100% 64px;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(246, 247, 241, .88);
+        border-bottom: 1px solid rgba(16, 40, 32, .08);
+        backdrop-filter: blur(14px);
+    }
+
+    .block-container {
+        max-width: 1320px;
+        /* Streamlit標準ヘッダーの下から本文を始め、独自ヘッダーの欠けを防ぐ */
+        padding-top: 5.75rem;
+        padding-bottom: 5rem;
+    }
+
+    .dq-header {
+        position: relative;
+        z-index: 1;
+        min-height: 4rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin: 0 0 4.2rem;
+        padding: .25rem 0 1.15rem;
+        border-bottom: 1px solid var(--dq-line);
+    }
+
+    .dq-brand {
+        display: flex;
+        align-items: center;
+        gap: .85rem;
+    }
+
+    .dq-mark {
+        width: 48px;
+        height: 48px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: var(--dq-green);
+        color: #ffffff;
+        font-family: Georgia, serif;
+        font-size: 1.65rem;
+        font-weight: 700;
+        box-shadow: 0 9px 24px rgba(8, 107, 80, .16);
+    }
+
+    .dq-brand-name {
+        color: var(--dq-ink);
+        font-family: Georgia, "Yu Mincho", serif;
+        font-size: 1.35rem;
+        font-weight: 700;
+        line-height: 1.1;
+    }
+
+    .dq-brand-sub {
+        margin-top: .3rem;
+        color: var(--dq-muted);
+        font-size: .72rem;
+        letter-spacing: .07em;
+    }
+
+    .dq-edition {
+        display: flex;
+        align-items: center;
+        gap: .55rem;
+        color: var(--dq-muted);
+        font-size: .82rem;
+        font-weight: 700;
+    }
+
+    .dq-edition::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--dq-lime);
+        box-shadow: 0 0 0 5px rgba(182, 216, 107, .18);
+    }
+
+    .dq-eyebrow {
+        margin: .1rem 0 1.4rem;
+        color: var(--dq-green);
+        font-size: .72rem;
+        font-weight: 800;
+        letter-spacing: .18em;
+    }
+
+    .dq-title {
+        max-width: 620px;
+        margin: 0;
+        color: var(--dq-ink);
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif;
+        font-size: clamp(3rem, 5.4vw, 5.2rem);
+        font-weight: 500;
+        line-height: 1.28;
+        letter-spacing: -.055em;
+    }
+
+    .dq-lead {
+        max-width: 590px;
+        margin: 2rem 0 0;
+        color: var(--dq-muted);
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+        font-size: 1rem;
+        line-height: 2;
+    }
+
+    .dq-stats {
+        display: flex;
+        gap: clamp(1.5rem, 4vw, 3.6rem);
+        max-width: 610px;
+        margin-top: 2.2rem;
+        padding-top: 1.35rem;
+        border-top: 1px solid var(--dq-line);
+    }
+
+    .dq-stat strong {
+        display: block;
+        color: var(--dq-ink);
+        font-family: Georgia, serif;
+        font-size: 1.75rem;
+        line-height: 1;
+    }
+
+    .dq-stat span {
+        display: block;
+        margin-top: .45rem;
+        color: var(--dq-muted);
+        font-size: .7rem;
+        letter-spacing: .06em;
+    }
+
+    .dq-search-heading {
+        margin: 0 0 .2rem;
+        color: var(--dq-ink);
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+        font-size: 1.4rem;
+        font-weight: 700;
+    }
+
+    .dq-search-copy {
+        margin: 0 0 1.35rem;
+        color: var(--dq-muted);
+        font-size: .78rem;
+        line-height: 1.7;
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        border-color: rgba(16, 40, 32, .10) !important;
+        border-radius: 0 !important;
+        background: var(--dq-card);
+        box-shadow: 0 25px 65px rgba(23, 48, 39, .09);
+    }
+
+    [data-testid="stVerticalBlockBorderWrapper"] > div {
+        border-top: 5px solid var(--dq-lime);
+        padding: clamp(1.4rem, 3vw, 2.2rem);
+    }
+
+    [data-testid="stTextInput"] label,
+    [data-testid="stSelectbox"] label {
+        color: var(--dq-ink);
+        font-size: .78rem;
+        font-weight: 800;
+        letter-spacing: .04em;
+    }
+
+    [data-testid="stTextInput"] input {
+        border: 0;
+        border-bottom: 2px solid var(--dq-ink);
+        border-radius: 0;
+        background: transparent;
+        color: var(--dq-ink);
+        font-size: 1.05rem;
+        box-shadow: none;
+    }
+
+    [data-testid="stTextInput"] input:focus {
+        border-color: var(--dq-green);
+        box-shadow: none;
+    }
+
+    [data-testid="stSelectbox"] > div > div {
+        border-color: var(--dq-line);
+        border-radius: 0;
+        background: var(--dq-paper);
+    }
+
+    [data-testid="stAlert"] {
+        border: 1px solid var(--dq-line);
+        border-left: 5px solid var(--dq-green);
+        border-radius: 0;
+        background: var(--dq-card);
+        color: var(--dq-ink);
+    }
+
+    [data-testid="stExpander"] {
+        margin-bottom: .7rem;
+        border: 1px solid rgba(16, 40, 32, .10);
+        border-radius: 0;
+        background: var(--dq-card);
+        box-shadow: 0 8px 24px rgba(23, 48, 39, .035);
+    }
+
+    [data-testid="stExpander"] summary {
+        color: var(--dq-ink);
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+        font-weight: 700;
+    }
+
+    [data-testid="stDownloadButton"] button,
+    .stButton button {
+        min-height: 2.8rem;
+        border: 1px solid var(--dq-green);
+        border-radius: 0;
+        background: var(--dq-green);
+        color: #ffffff;
+        font-weight: 700;
+    }
+
+    [data-testid="stDownloadButton"] button:hover,
+    .stButton button:hover {
+        border-color: var(--dq-green-dark);
+        background: var(--dq-green-dark);
+        color: #ffffff;
+    }
+
+    .dq-results-title {
+        margin: 3.2rem 0 1.2rem;
+        color: var(--dq-ink);
+        font-family: "Hiragino Mincho ProN", "Yu Mincho", serif;
+        font-size: 1.8rem;
+        font-weight: 600;
+    }
+
+    @media (max-width: 700px) {
+        .block-container {
+            padding-top: 5rem;
+        }
+
+        .dq-header {
+            margin-bottom: 2.5rem;
+        }
+
+        .dq-edition {
+            font-size: .7rem;
+        }
+
+        .dq-title {
+            font-size: 2.7rem;
+        }
+
+        .dq-stats {
+            gap: 1.4rem;
+            margin-bottom: 1.7rem;
+        }
+
+        .dq-stat strong {
+            font-size: 1.4rem;
+        }
+    }
+    </style>
+
+    <header class="dq-header">
+        <div class="dq-brand">
+            <div class="dq-mark">D</div>
+            <div>
+                <div class="dq-brand-name">Dental Query</div>
+                <div class="dq-brand-sub">国家試験データベース</div>
+            </div>
+        </div>
+        <div class="dq-edition">第97–119回</div>
+    </header>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ===== 列名正規化 & 安全取得ユーティリティ =====
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -514,7 +810,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     alias = {
         "問題文":  ["設問", "問題", "本文"],
         "選択肢1": ["選択è¢Ａ","選択肢a","A","ａ"],
-        "選択肢2": ["選択肢Ｂ","選択肢b","B","ｂ"],
+        "選択è¢2": ["選択肢Ｂ","選択肢b","B","ｂ"],
         "選択肢3": ["選択肢Ｃ","選択肢c","C","ｃ"],
         "選択肢4": ["選択肢Ｄ","選択肢d","D","ｄ"],
         "選択肢5": ["選択肢Ｅ","選択肢e","E","ｅ"],
@@ -564,11 +860,63 @@ df = pd.read_csv("97_119DB.csv", dtype=str, encoding="utf-8-sig")
 df = df.fillna("")
 df = normalize_columns(df)
 
-# ===== 検索 =====
-query = st.text_input("問題文・選択肢・分類・画像リンク(URL)で検索:")
-st.caption("💡 検索語を `&` でつなげるとAND検索（例: レジン & 硬さ）。URLの一部（例: http, drive.google）でも可。")
+# ===== ヒーロー・検索 =====
+category_values = sorted(
+    [value for value in df["科目分類"].dropna().unique().tolist() if str(value).strip()]
+)
 
-if not query:
+hero_col, search_col = st.columns([1.08, .92], gap="large", vertical_alignment="center")
+
+with hero_col:
+    st.markdown(
+        f"""
+        <div class="dq-eyebrow">DENTAL NATIONAL EXAM ARCHIVE</div>
+        <h1 class="dq-title">知りたい問題へ、<br>すばやく辿り着く。</h1>
+        <p class="dq-lead">
+            歯科医師国家試験8,000問以上を、問題文・選択肢・分類から横断検索。
+            学生指導と日々の復習のための、軽快な検索ツールです。
+        </p>
+        <div class="dq-stats">
+            <div class="dq-stat">
+                <strong>{len(df):,}</strong>
+                <span>収録問題</span>
+            </div>
+            <div class="dq-stat">
+                <strong>{len(category_values)}</strong>
+                <span>分類</span>
+            </div>
+            <div class="dq-stat">
+                <strong>23</strong>
+                <span>試験回</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+with search_col:
+    with st.container(border=True):
+        st.markdown(
+            """
+            <div class="dq-search-heading">キーワード検索</div>
+            <p class="dq-search-copy">
+                問題文・選択肢・分類・画像リンクを横断して探します。
+            </p>
+            """,
+            unsafe_allow_html=True,
+        )
+        query = st.text_input(
+            "検索語",
+            placeholder="例：レジン & 硬さ",
+            help="複数語を & でつなぐとAND検索になります。",
+        )
+        selected_category = st.selectbox(
+            "科目分類",
+            ["すべて"] + category_values,
+        )
+        st.caption("複数語は `&` でAND検索できます。URLの一部も検索対象です。")
+
+if not query and selected_category == "すべて":
     st.stop()
 
 keywords = [kw.strip() for kw in query.split("&") if kw.strip()]
@@ -589,12 +937,17 @@ df_filtered = df[df.apply(
     lambda row: all(kw.lower() in row_text(row).lower() for kw in keywords),
     axis=1
 )]
+
+if selected_category != "すべて":
+    df_filtered = df_filtered[df_filtered["科目分類"] == selected_category]
+
 df_filtered = df_filtered.reset_index(drop=True)
 
 st.info(f"{len(df_filtered)}件ヒットしました")
 
 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-file_prefix = f"{(query if query else '検索なし')}{timestamp}"
+search_name = query if query else selected_category
+file_prefix = f"{search_name}{timestamp}"
 
 # ===== CSV ダウンロード =====
 csv_buffer = io.StringIO()
@@ -882,7 +1235,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
                 draw_wrapped_lines(err_lines)
         else:
             if link_raw:
-                draw_wrapped_lines(wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12))
+                draw_wrapped_lines(wrapped_lines("", "[画像読みè¾¼み失敗]", usable_width, JAPANESE_FONT, 12))
 
         draw_wrapped_lines(ans_lines)
         draw_wrapped_lines(cat_lines)
@@ -921,7 +1274,10 @@ if st.session_state["pdf_bytes"] is not None:
     )
 
 # ===== 画面の一覧（正解は初期非表示）=====
-st.markdown("### 🔍 ヒットした問題一覧")
+st.markdown(
+    '<div class="dq-results-title">ヒットした問題一覧</div>',
+    unsafe_allow_html=True,
+)
 for i, (_, record) in enumerate(df_filtered.iterrows()):
     title = safe_get(record, ["問題文","設問","問題","本文"])
     with st.expander(f"{i+1}. {title[:50]}..."):
