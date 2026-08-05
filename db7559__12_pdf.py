@@ -54,6 +54,24 @@ def _setup_fallback_font():
 
 FALLBACK_FONT = _setup_fallback_font()
 
+# ---- 歯式記号専用フォント ----
+def _setup_symbol_font():
+    here = Path(__file__).parent
+    candidates = [
+        here / "fonts" / "NotoSansSymbols2-Regular.ttf",
+        Path.cwd() / "fonts" / "NotoSansSymbols2-Regular.ttf",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                pdfmetrics.registerFont(TTFont("DentalSymbols", str(p)))
+                return "DentalSymbols"
+            except Exception:
+                continue
+    return FALLBACK_FONT
+
+SYMBOL_FONT = _setup_symbol_font()
+
 # ---- アラビア文字の連結表示・右→左の表示順を補正 ----
 try:
     import arabic_reshaper
@@ -63,6 +81,50 @@ except ImportError:
     _bidi_display = None
 
 _ARABIC_RE = re.compile(r'[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]')
+_DENTISTRY_SYMBOLS = frozenset("⎾⎿⏉⏊⏋⏌")
+_BIDI_CONTROL_RE = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+_KNOWN_MOJIBAKE = {
+    "�｢": "Ⅳ",
+    "�｣": "Ⅵ",
+    "�･": "Ⅶ",
+    "�ｦ": "Ⅷ",
+    "�ｧ": "Ⅸ",
+    "�ｨ": "Ⅹ",
+    "�ｩ": "Ⅺ",
+}
+
+def _repair_known_mojibake(text: str) -> str:
+    """旧文字コード変換で壊れた、対応が確定しているローマ数字を戻す。"""
+    repaired = "" if text is None else str(text)
+    for broken, correct in _KNOWN_MOJIBAKE.items():
+        repaired = repaired.replace(broken, correct)
+    return repaired
+
+def _sanitize_pdf_text(text: str) -> str:
+    """歯式の並びを崩す不可視の方向制御文字をPDF描画前に除去する。"""
+    return _BIDI_CONTROL_RE.sub("", _repair_known_mojibake(text))
+
+def _font_has_character(font_name: str | None, ch: str) -> bool:
+    if not font_name:
+        return False
+    try:
+        widths = getattr(pdfmetrics.getFont(font_name).face, "charWidths", {})
+        return ord(ch) in widths
+    except Exception:
+        return False
+
+def _font_for_character(ch: str) -> str:
+    if ch in _DENTISTRY_SYMBOLS and _font_has_character(SYMBOL_FONT, ch):
+        return SYMBOL_FONT
+    if _ARABIC_RE.match(ch) and _font_has_character(FALLBACK_FONT, ch):
+        return FALLBACK_FONT
+    if _font_has_character(JAPANESE_FONT, ch):
+        return JAPANESE_FONT
+    if _font_has_character(FALLBACK_FONT, ch):
+        return FALLBACK_FONT
+    if _font_has_character(SYMBOL_FONT, ch):
+        return SYMBOL_FONT
+    return JAPANESE_FONT
 
 def _shape_arabic(text: str) -> str:
     """アラビア文字が含まれる場合のみ、文字の連結（reshape）と表示順（bidi）を整える"""
@@ -74,21 +136,22 @@ def _shape_arabic(text: str) -> str:
         return text
 
 def _split_font_runs(text: str):
-    """文字列をアラビア文字とそれ以外のランに分割し、それぞれの描画フォントを決める"""
-    if not text or FALLBACK_FONT is None:
-        return [(JAPANESE_FONT, text or "")]
+    """各文字を収録フォントへ振り分け、連続する同一フォントをまとめる。"""
+    text = _sanitize_pdf_text(text)
+    if not text:
+        return [(JAPANESE_FONT, "")]
     runs = []
-    buf, cur_is_arabic = "", None
+    buf, current_font = "", None
     for ch in text:
-        is_arabic = bool(_ARABIC_RE.match(ch))
-        if cur_is_arabic is None:
-            cur_is_arabic = is_arabic
-        if is_arabic != cur_is_arabic:
-            runs.append((FALLBACK_FONT if cur_is_arabic else JAPANESE_FONT, buf))
-            buf, cur_is_arabic = "", is_arabic
+        font = _font_for_character(ch)
+        if current_font is None:
+            current_font = font
+        if font != current_font:
+            runs.append((current_font, buf))
+            buf, current_font = "", font
         buf += ch
     if buf:
-        runs.append((FALLBACK_FONT if cur_is_arabic else JAPANESE_FONT, buf))
+        runs.append((current_font, buf))
     return runs
 
 def _text_width(text: str, font_size: int) -> float:
@@ -843,7 +906,7 @@ def safe_get(row: pd.Series | dict, keys, default=""):
                 pass
             s = str(v).strip() if v is not None else ""
             if s:
-                return s
+                return _repair_known_mojibake(s)
     return default
 
 def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -1092,7 +1155,8 @@ def wrap_text(text: str, max_width: float, font_name: str, font_size: int):
     return lines
 
 def wrapped_lines(prefix: str, value: str, usable_width: float, font: str, size: int):
-    return wrap_text(f"{prefix}{_shape_arabic(value)}", usable_width, font, size)
+    clean_value = _sanitize_pdf_text(value)
+    return wrap_text(f"{prefix}{_shape_arabic(clean_value)}", usable_width, font, size)
 
 def format_record_to_text(row: pd.Series) -> str:
     q = safe_get(row, ["問題文","設問","問題","本文"])
@@ -1235,7 +1299,7 @@ def create_pdf(records, progress=None, status=None, start_time=None):
                 draw_wrapped_lines(err_lines)
         else:
             if link_raw:
-                draw_wrapped_lines(wrapped_lines("", "[画像読みè¾¼み失敗]", usable_width, JAPANESE_FONT, 12))
+                draw_wrapped_lines(wrapped_lines("", "[画像読み込み失敗]", usable_width, JAPANESE_FONT, 12))
 
         draw_wrapped_lines(ans_lines)
         draw_wrapped_lines(cat_lines)
@@ -1307,4 +1371,3 @@ for i, (_, record) in enumerate(df_filtered.iterrows()):
 # デバッグ補助（必要時だけ展開）
 #with st.expander("🔧 現在の列名（正規化後）"):
 #   st.write(list(df.columns))
-
