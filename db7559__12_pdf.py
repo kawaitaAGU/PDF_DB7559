@@ -568,6 +568,7 @@ st.markdown(
     """
     <style>
     :root {
+        color-scheme: light;
         --dq-ink: #102820;
         --dq-green: #086b50;
         --dq-green-dark: #07513e;
@@ -751,14 +752,49 @@ st.markdown(
         letter-spacing: .04em;
     }
 
+    /* iPhone Safari のダークモードでも検索欄をライト配色に固定する */
+    [data-testid="stTextInput"],
+    [data-testid="stTextInput"] [data-baseweb="input"],
+    [data-testid="stTextInput"] [data-baseweb="base-input"],
+    [data-testid="stTextInput"] [data-baseweb="input"] > div,
+    [data-testid="stTextInput"] [data-baseweb="base-input"] > div {
+        color-scheme: light;
+        background-color: var(--dq-card) !important;
+        color: var(--dq-ink) !important;
+    }
+
     [data-testid="stTextInput"] input {
         border: 0;
         border-bottom: 2px solid var(--dq-ink);
         border-radius: 0;
-        background: transparent;
-        color: var(--dq-ink);
+        background-color: var(--dq-card) !important;
+        color: var(--dq-ink) !important;
+        -webkit-text-fill-color: var(--dq-ink) !important;
+        caret-color: var(--dq-green);
+        opacity: 1;
+        -webkit-appearance: none;
         font-size: 1.05rem;
         box-shadow: none;
+    }
+
+    /* Streamlit のモバイル入力時に表示される補助テキストも読みやすくする */
+    [data-testid="stTextInput"] [data-baseweb="input"] span,
+    [data-testid="stTextInput"] [data-baseweb="base-input"] span {
+        color: var(--dq-muted) !important;
+        -webkit-text-fill-color: var(--dq-muted) !important;
+    }
+
+    [data-testid="stTextInput"] input::placeholder {
+        color: var(--dq-muted) !important;
+        -webkit-text-fill-color: var(--dq-muted) !important;
+        opacity: .75;
+    }
+
+    [data-testid="stTextInput"] input:-webkit-autofill,
+    [data-testid="stTextInput"] input:-webkit-autofill:focus {
+        -webkit-text-fill-color: var(--dq-ink) !important;
+        -webkit-box-shadow: 0 0 0 1000px var(--dq-card) inset !important;
+        caret-color: var(--dq-green);
     }
 
     [data-testid="stTextInput"] input:focus {
@@ -770,6 +806,26 @@ st.markdown(
         border-color: var(--dq-line);
         border-radius: 0;
         background: var(--dq-paper);
+    }
+
+    [data-testid="stSelectbox"] [data-baseweb="select"] > div {
+        color-scheme: light;
+        background-color: var(--dq-paper) !important;
+        color: var(--dq-ink) !important;
+    }
+
+    [data-testid="stSelectbox"] [data-baseweb="select"] span {
+        color: var(--dq-ink) !important;
+        -webkit-text-fill-color: var(--dq-ink) !important;
+    }
+
+    [data-testid="stSelectbox"] [data-baseweb="select"] svg {
+        fill: var(--dq-ink) !important;
+    }
+
+    [data-testid="stCaptionContainer"],
+    [data-testid="stCaptionContainer"] * {
+        color: var(--dq-muted) !important;
     }
 
     [data-testid="stAlert"] {
