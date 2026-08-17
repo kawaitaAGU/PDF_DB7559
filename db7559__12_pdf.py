@@ -850,6 +850,26 @@ st.markdown(
         font-weight: 700;
     }
 
+    /* iPhoneなどのダークモードで、展開した中身の文字が
+       Streamlitのダークテーマ既定色（白系）になり、
+       常に明るいカード背景と重なって見えなくなるのを防ぐ */
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+        color-scheme: light;
+    }
+
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] p,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] li,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] span,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] strong,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] h1,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] h2,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] h3,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] label,
+    [data-testid="stExpander"] [data-testid="stExpanderDetails"] a {
+        color: var(--dq-ink) !important;
+        -webkit-text-fill-color: var(--dq-ink) !important;
+    }
+
     [data-testid="stDownloadButton"] button,
     .stButton button {
         min-height: 2.8rem;
