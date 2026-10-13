@@ -998,6 +998,10 @@ def ensure_output_columns(df: pd.DataFrame) -> pd.DataFrame:
 df = pd.read_csv("97_119DB.csv", dtype=str, encoding="utf-8-sig")
 df = df.fillna("")
 df = normalize_columns(df)
+# 正解番号がCSV内で「235.0」のようになっている場合、末尾の小数部だけ除去する。
+# a～e・削除問題などの文字列や、小数部が0以外の値はそのまま保持する。
+if "正解" in df.columns:
+    df["正解"] = df["正解"].str.strip().str.replace(r"^([0-9]+)\.0+$", r"\1", regex=True)
 
 # ===== ヒーロー・検索 =====
 category_values = sorted(
